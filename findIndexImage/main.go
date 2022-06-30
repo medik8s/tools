@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"text/tabwriter"
 	"time"
 )
 
@@ -17,42 +18,52 @@ func main() {
 	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle"
 	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=1"
 
-	for _, component := range []string{nhc, snr, nmo} {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
-
-		componentURL := fmt.Sprintf(url, component)
-		req, err := http.NewRequest("GET", componentURL, nil)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		defer resp.Body.Close()
-
-		responseBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		messages := &Messages{}
-		err = json.Unmarshal(responseBytes, messages)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		latestMessage := messages.RawMessages[0].Msg
-		fmt.Printf("bundle %s is in index image %s\n", latestMessage.Index.AddedBundleImages[0], latestMessage.Index.IndexImage)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
+	client := &http.Client{Transport: tr}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "Date\tBundle\tIndex Image\t")
+
+	for _, component := range []string{nhc, snr, nmo} {
+
+		// wrap in func for defer
+		func() {
+			componentURL := fmt.Sprintf(url, component)
+			req, err := http.NewRequest("GET", componentURL, nil)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			defer resp.Body.Close()
+
+			responseBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			messages := &Messages{}
+			err = json.Unmarshal(responseBytes, messages)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			latestMessage := messages.RawMessages[0].Msg
+			time := latestMessage.GeneratedAt.Format(time.RFC1123)
+			fmt.Fprintf(w, "%s\t%s\t%s\t\n", time, latestMessage.Index.AddedBundleImages[0], latestMessage.Index.IndexImage)
+		}()
+	}
+
+	w.Flush()
 
 }
 
