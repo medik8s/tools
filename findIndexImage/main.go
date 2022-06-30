@@ -13,9 +13,9 @@ import (
 
 func main() {
 
-	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle"
-	snr := "red-hat-workload-availability-self-node-remediation-bundle"
-	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle"
+	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v0.3"
+	snr := "red-hat-workload-availability-self-node-remediation-bundle:v0.4"
+	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v4.11"
 	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=1"
 
 	tr := &http.Transport{
