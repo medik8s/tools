@@ -13,9 +13,9 @@ import (
 
 func main() {
 
-	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v0.3"
-	snr := "red-hat-workload-availability-self-node-remediation-bundle:v0.4"
-	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v4.11"
+	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v"
+	snr := "red-hat-workload-availability-self-node-remediation-bundle:v"
+	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v"
 	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=1"
 
 	tr := &http.Transport{
@@ -55,6 +55,11 @@ func main() {
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
+			}
+
+			if len(messages.RawMessages) == 0 {
+				fmt.Fprintf(w, "%s\t%s\t%s\t\n", "", component, "not found, too old?!")
+				return
 			}
 
 			latestMessage := messages.RawMessages[0].Msg
