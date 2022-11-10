@@ -3,6 +3,7 @@
 set -e
 
 export IMAGE_REGISTRY=${IMAGE_REGISTRY:-quay.io/medik8s}
+export DEPLOY_NAMESPACE=${DEPLOY_NAMESPACE:-medik8s-upstream}
 
 # Version for the index image
 export INDEX_VERSION=${INDEX_VERSION:-0.0.1-test}
@@ -129,6 +130,16 @@ fi
 
 if [ "$DEPLOY" = true ]; then
 
+    # create OperatorGroup
+    cat > og.yaml <<EOF
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: medik8s
+  namespace: ${DEPLOY_NAMESPACE}
+spec: {}
+EOF
+
     # create CatalogSource and Subscription
     cat > cs.yaml <<EOF
 apiVersion: operators.coreos.com/v1alpha1
@@ -146,35 +157,46 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
   name: nhc-snr
-  namespace: openshift-operators
+  namespace: ${DEPLOY_NAMESPACE}
 spec:
   name: node-healthcheck-operator
-  channel: candidate
+  channel: stable
   source: medik8s-upstream
   sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic
 EOF
 
-    # check oc installed
-    which oc 2>/dev/null || (
-      echo "please install oc"
-      exit 1
-    )
+    # select command line binary, kubectl or oc
+    set +e
+    export CMD=kubectl
+    which ${CMD}
+    if [ $? != 0 ]; then
+      CMD=oc
+      which ${CMD}
+      if [ $? != 0 ]; then
+        echo "please install kubectl or oc"
+        exit 1
+      fi
+    fi
+    echo "using ${CMD}"
+    set -e
 
     # check working cluster config
-    oc get node || (
+    ${CMD} get node || (
         echo "failed to access cluster, check your $KUBECONFIG"
         exit 1
     )
 
     # disable default sources with older versions
-    oc patch OperatorHub cluster --type json -p '[{"op": "add", "path": "/spec/disableAllDefaultSources", "value": true}]' || true
+    ${CMD} patch OperatorHub cluster --type json -p '[{"op": "add", "path": "/spec/disableAllDefaultSources", "value": true}]' || true
 
-    oc apply -f cs.yaml
+    ${CMD} create namespace ${DEPLOY_NAMESPACE} || true
+    ${CMD} apply -f og.yaml || true
+    ${CMD} apply -f cs.yaml || true
 
     echo "waiting a bit to let the CatalogSource come up"
     sleep 10
 
-    oc apply -f sub.yaml
+    ${CMD} apply -f sub.yaml
 
 fi
