@@ -4,6 +4,7 @@ set -e
 
 export IMAGE_REGISTRY=${IMAGE_REGISTRY:-quay.io/medik8s}
 export DEPLOY_NAMESPACE=${DEPLOY_NAMESPACE:-medik8s-upstream}
+export CATALOG_SOURCE_NAMESPACE=${CATALOG_SOURCE_NAMESPACE:-openshift-operators}
 
 # Version for the index image
 export INDEX_VERSION=${INDEX_VERSION:-0.0.1-test}
@@ -30,6 +31,7 @@ usage() {
 	echo "--skip-snr: skip building SNR, use last built images"
 	echo "--skip-build: skip building NHC, SNR and index images, use last built images"
 	echo "--skip-deploy: skip deployment"
+	echo "--http: use http image registry for opm"
 	echo "--help | -h: print usage"
 }
 
@@ -37,6 +39,7 @@ BUILD_NHC=true
 BUILD_SNR=true
 BUILD_INDEX=true
 DEPLOY=true
+OPM_HTTP=false
 
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -56,6 +59,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--skip-deploy)
 		DEPLOY=false
+		shift
+		;;
+	--http)
+		OPM_HTTP=true
 		shift
 		;;
 	-h | --help)
@@ -123,8 +130,12 @@ fi
 
 export INDEX_IMG=${IMAGE_REGISTRY}/nhc-snr-index:v${INDEX_VERSION}
 if [ "$BUILD_INDEX" = true ]; then
+	OPM_OPTS=""
+	if [ "$OPM_HTTP" = true ]; then
+	  OPM_OPTS="--use-http"
+	fi
 	# Build index image
-	$OPM_BIN index add --build-tool docker --mode semver --tag $INDEX_IMG --bundles ${IMAGE_REGISTRY}/node-healthcheck-operator-bundle:v${NHC_VERSION},${IMAGE_REGISTRY}/self-node-remediation-operator-bundle:v${SNR_VERSION}
+	$OPM_BIN index add $OPM_OPTS --build-tool docker --mode semver --tag $INDEX_IMG --bundles ${IMAGE_REGISTRY}/node-healthcheck-operator-bundle:v${NHC_VERSION},${IMAGE_REGISTRY}/self-node-remediation-operator-bundle:v${SNR_VERSION}
 	docker push $INDEX_IMG
 fi
 
@@ -146,7 +157,7 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
   name: medik8s-upstream
-  namespace: openshift-marketplace
+  namespace: ${CATALOG_SOURCE_NAMESPACE}
 spec:
   sourceType: grpc
   image: $INDEX_IMG
@@ -162,7 +173,7 @@ spec:
   name: node-healthcheck-operator
   channel: stable
   source: medik8s-upstream
-  sourceNamespace: openshift-marketplace
+  sourceNamespace: ${CATALOG_SOURCE_NAMESPACE}
   installPlanApproval: Automatic
 EOF
 
