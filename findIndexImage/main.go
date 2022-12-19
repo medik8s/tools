@@ -7,24 +7,22 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"text/tabwriter"
 	"time"
 )
+
+var ocpVersions = []string{"v4.10", "v4.11", "v4.12", "v4.13", "4.14", "4.15"}
 
 func main() {
 
 	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v"
 	snr := "red-hat-workload-availability-self-node-remediation-bundle:v"
 	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v"
-	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=1"
+	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=20"
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "Date\tBundle\tIndex Image\t")
 
 	for _, component := range []string{nhc, snr, nmo} {
 
@@ -58,18 +56,55 @@ func main() {
 			}
 
 			if len(messages.RawMessages) == 0 {
-				fmt.Fprintf(w, "%s\t%s\t%s\t\n", "", component, "not found, too old?!")
+				fmt.Printf("%s not found, last build too old?!\n\n", component)
 				return
 			}
 
-			latestMessage := messages.RawMessages[0].Msg
-			time := latestMessage.GeneratedAt.Format(time.RFC1123)
-			fmt.Fprintf(w, "%s\t%s\t%s\t\n", time, latestMessage.Index.AddedBundleImages[0], latestMessage.Index.IndexImage)
+			results := make(map[string]Result)
+			for i := 0; i < len(messages.RawMessages); i++ {
+				message := messages.RawMessages[i].Msg
+				ocpVersion := message.Index.OcpVersion
+				if _, exists := results[ocpVersion]; exists {
+					continue
+				}
+				generatedAt := message.GeneratedAt.Format(time.RFC1123)
+				bundleImage := message.Index.AddedBundleImages[0]
+				indexImage := message.Index.IndexImage
+				results[ocpVersion] = Result{
+					bundleImage: bundleImage,
+					ocpVersion:  ocpVersion,
+					indexImage:  indexImage,
+					generatedAt: generatedAt,
+				}
+				if done(results) {
+					break
+				}
+			}
+
+			for _, v := range ocpVersions {
+				if r, exists := results[v]; exists {
+					fmt.Printf("OCP %s\n  %s\n  %s\n  %s\n\n", r.ocpVersion, r.bundleImage, r.indexImage, r.generatedAt)
+				}
+			}
+
 		}()
 	}
+}
 
-	w.Flush()
+func done(results map[string]Result) bool {
+	for _, v := range ocpVersions {
+		if _, exists := results[v]; !exists {
+			return false
+		}
+	}
+	return true
+}
 
+type Result struct {
+	bundleImage string
+	ocpVersion  string
+	indexImage  string
+	generatedAt string
 }
 
 type Messages struct {
