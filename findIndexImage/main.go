@@ -17,6 +17,8 @@ func main() {
 	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v"
 	snr := "red-hat-workload-availability-self-node-remediation-bundle:v"
 	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v"
+	mdr := "red-hat-workload-availability-machine-deletion-remediation-operator-bundle:v"
+	far := "red-hat-workload-availability-fence-agents-remediation-bundle:v"
 	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=20"
 
 	tr := &http.Transport{
@@ -24,7 +26,7 @@ func main() {
 	}
 	client := &http.Client{Transport: tr}
 
-	for _, component := range []string{nhc, snr, nmo} {
+	for _, component := range []string{nhc, snr, nmo, mdr, far} {
 
 		// wrap in func for defer
 		func() {
