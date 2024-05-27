@@ -7,106 +7,170 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"time"
 )
 
-var ocpVersions = []string{"v4.10", "v4.11", "v4.12", "v4.13", "4.14", "4.15"}
-
 func main() {
 
-	nhc := "red-hat-workload-availability-node-healthcheck-operator-bundle:v"
-	snr := "red-hat-workload-availability-self-node-remediation-bundle:v"
-	nmo := "red-hat-workload-availability-node-maintenance-operator-bundle:v"
-	mdr := "red-hat-workload-availability-machine-deletion-remediation-operator-bundle:v"
-	far := "red-hat-workload-availability-fence-agents-remediation-bundle:v"
-	url := "https://datagrepper.engineering.redhat.com/raw?topic=/topic/VirtualTopic.eng.ci.redhat-container-image.index.built&contains=%s&rows_per_page=20"
+	topic := "/topic/VirtualTopic.eng.ci.redhat-container-image.index.built"
+	searchTerm := "workload-availability"
+	timeFrame := 4 * 7 * 24 * time.Hour // 4 weeks
+	rowsPerPage := 100                  // 100 is max allowed value!
+
+	// keys are ocp version, operator name and operator version
+	results := make(map[string]map[string]map[string]Result)
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
 
-	for _, component := range []string{nhc, snr, nmo, mdr, far} {
+	for page := 1; true; page++ {
+		url := fmt.Sprintf("https://datagrepper.engineering.redhat.com/raw?topic=%s&delta=%v&contains=%s&rows_per_page=%v&page=%v", topic, int(timeFrame.Seconds()), searchTerm, rowsPerPage, page)
+		//fmt.Printf("URL: %s\n\n", url)
+		fmt.Println("getting more results, please wait...")
 
-		// wrap in func for defer
-		func() {
-			componentURL := fmt.Sprintf(url, component)
-			req, err := http.NewRequest("GET", componentURL, nil)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
-			resp, err := client.Do(req)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			defer resp.Body.Close()
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
 
-			responseBytes, err := io.ReadAll(resp.Body)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
+		responseBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
-			messages := &Messages{}
-			err = json.Unmarshal(responseBytes, messages)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
+		if resp.StatusCode != 200 {
+			fmt.Printf("HTTP status code: %d\n", resp.StatusCode)
+			fmt.Printf("Response: %s\n", string(responseBytes))
+			os.Exit(1)
+		}
 
-			if len(messages.RawMessages) == 0 {
-				fmt.Printf("%s not found, last build too old?!\n\n", component)
-				return
-			}
+		messages := &Messages{}
+		err = json.Unmarshal(responseBytes, messages)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
-			results := make(map[string]Result)
-			for i := 0; i < len(messages.RawMessages); i++ {
-				message := messages.RawMessages[i].Msg
-				ocpVersion := message.Index.OcpVersion
-				if _, exists := results[ocpVersion]; exists {
-					continue
-				}
-				generatedAt := message.GeneratedAt.Format(time.RFC1123)
-				bundleImage := message.Index.AddedBundleImages[0]
-				indexImage := message.Index.IndexImage
-				results[ocpVersion] = Result{
-					bundleImage: bundleImage,
-					ocpVersion:  ocpVersion,
-					indexImage:  indexImage,
-					generatedAt: generatedAt,
-				}
-				if done(results) {
-					break
+		if len(messages.RawMessages) == 0 {
+			fmt.Println("no builds found!")
+			return
+		}
+
+		for i := 0; i < len(messages.RawMessages); i++ {
+			message := messages.RawMessages[i].Msg
+			ocpVersion := message.Index.OcpVersion
+			nvr := message.Artifact.Nvr
+			operator, release, version := getOperatorReleaseVersionFromNvr(nvr)
+			if _, exists := results[ocpVersion]; exists {
+				if _, exists := results[ocpVersion][operator]; exists {
+					if _, exists := results[ocpVersion][operator][version]; exists {
+						continue
+					}
 				}
 			}
-
-			for _, v := range ocpVersions {
-				if r, exists := results[v]; exists {
-					fmt.Printf("OCP %s\n  %s\n  %s\n  %s\n\n", r.ocpVersion, r.bundleImage, r.indexImage, r.generatedAt)
-				}
+			generatedAt := message.GeneratedAt
+			bundleImage := message.Index.AddedBundleImages[0]
+			indexImage := message.Index.IndexImage
+			indexNr := getNrFromIndexImage(indexImage)
+			if _, exists := results[ocpVersion]; !exists {
+				results[ocpVersion] = make(map[string]map[string]Result)
 			}
+			if _, exists := results[ocpVersion][operator]; !exists {
+				results[ocpVersion][operator] = make(map[string]Result)
+			}
+			results[ocpVersion][operator][version] = Result{
+				operator:      operator,
+				bundleVersion: version,
+				bundleRelease: release,
+				bundleImage:   bundleImage,
+				ocpVersion:    ocpVersion,
+				indexImage:    indexImage,
+				indexNumber:   indexNr,
+				generatedAt:   generatedAt,
+			}
+		}
 
-		}()
+		if messages.Pages == page {
+			break
+		}
+
 	}
+
+	printResults(results)
 }
 
-func done(results map[string]Result) bool {
-	for _, v := range ocpVersions {
-		if _, exists := results[v]; !exists {
-			return false
+func getOperatorReleaseVersionFromNvr(nvr string) (string, string, string) {
+	match := "-bundle-container-"
+	index := strings.Index(nvr, match)
+	if index == -1 {
+		fmt.Printf("could not find operator and version in NVR: %s\n", nvr)
+		return nvr, "n/a", "n/a"
+	}
+	operator := nvr[:index]
+	release := nvr[index+len(match):]
+	version := strings.Split(release, "-")[0]
+	return operator, release, version
+}
+
+func getNrFromIndexImage(indexImage string) string {
+	match := "/iib:"
+	index := strings.Index(indexImage, match)
+	if index == -1 {
+		fmt.Printf("could not find index number in index image: %s\n", indexImage)
+		return indexImage
+	}
+	return indexImage[index+len(match):]
+}
+
+func printResults(results map[string]map[string]map[string]Result) {
+	// sort by OCP version
+	ocpVersions := make([]string, 0, len(results))
+	for ocpVersion := range results {
+		ocpVersions = append(ocpVersions, ocpVersion)
+	}
+	sort.Strings(ocpVersions)
+	for _, ocpVersion := range ocpVersions {
+		fmt.Printf("OCP Version: %s\n", ocpVersion)
+		fmt.Println("==================")
+		ocpVersionResults := results[ocpVersion]
+		operators := make([]string, 0, len(ocpVersionResults))
+		for operator := range ocpVersionResults {
+			operators = append(operators, operator)
+		}
+		sort.Strings(operators)
+		for _, operator := range operators {
+			operatorResults := ocpVersionResults[operator]
+			for version := range operatorResults {
+				result := operatorResults[version]
+				fmt.Printf("%s release %s in index %s, added on %s\n", result.operator, result.bundleRelease, result.indexNumber, result.generatedAt.Format(time.RFC1123))
+			}
+			fmt.Println("---")
 		}
 	}
-	return true
 }
 
 type Result struct {
-	bundleImage string
-	ocpVersion  string
-	indexImage  string
-	generatedAt string
+	operator      string
+	bundleImage   string
+	bundleRelease string
+	bundleVersion string
+	ocpVersion    string
+	indexImage    string
+	indexNumber   string
+	generatedAt   time.Time
 }
 
 type Messages struct {

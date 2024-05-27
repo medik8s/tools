@@ -1,3 +1,3 @@
 module github.com/medik8s/findIndexImage
 
-go 1.18
+go 1.21
