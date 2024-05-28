@@ -30,7 +30,7 @@ func main() {
 	for page := 1; true; page++ {
 		url := fmt.Sprintf("https://datagrepper.engineering.redhat.com/raw?topic=%s&delta=%v&contains=%s&rows_per_page=%v&page=%v", topic, int(timeFrame.Seconds()), searchTerm, rowsPerPage, page)
 		//fmt.Printf("URL: %s\n\n", url)
-		fmt.Println("getting more results, please wait...")
+		//fmt.Println("getting more results, please wait...")
 
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -92,14 +92,14 @@ func main() {
 				results[ocpVersion][operator] = make(map[string]Result)
 			}
 			results[ocpVersion][operator][version] = Result{
-				operator:      operator,
-				bundleVersion: version,
-				bundleRelease: release,
-				bundleImage:   bundleImage,
-				ocpVersion:    ocpVersion,
-				indexImage:    indexImage,
-				indexNumber:   indexNr,
-				generatedAt:   generatedAt,
+				Operator:      operator,
+				BundleVersion: version,
+				BundleRelease: release,
+				BundleImage:   bundleImage,
+				OcpVersion:    ocpVersion,
+				IndexImage:    indexImage,
+				IndexNumber:   indexNr,
+				GeneratedAt:   generatedAt,
 			}
 		}
 
@@ -142,9 +142,10 @@ func printResults(results map[string]map[string]map[string]Result) {
 		ocpVersions = append(ocpVersions, ocpVersion)
 	}
 	sort.Strings(ocpVersions)
+	sortedResults := make([]Result, 0)
 	for _, ocpVersion := range ocpVersions {
-		fmt.Printf("OCP Version: %s\n", ocpVersion)
-		fmt.Println("==================")
+		//fmt.Printf("OCP Version: %s\n", ocpVersion)
+		//fmt.Println("==================")
 		ocpVersionResults := results[ocpVersion]
 		operators := make([]string, 0, len(ocpVersionResults))
 		for operator := range ocpVersionResults {
@@ -155,22 +156,29 @@ func printResults(results map[string]map[string]map[string]Result) {
 			operatorResults := ocpVersionResults[operator]
 			for version := range operatorResults {
 				result := operatorResults[version]
-				fmt.Printf("%s release %s in index %s, added on %s\n", result.operator, result.bundleRelease, result.indexNumber, result.generatedAt.Format(time.RFC1123))
+				sortedResults = append(sortedResults, result)
+				//fmt.Printf("%s release %s in index %s, added on %s\n", result.operator, result.bundleRelease, result.indexNumber, result.generatedAt.Format(time.RFC1123))
 			}
-			fmt.Println("---")
+			//fmt.Println("---")
 		}
 	}
+	resultBytes, err := json.MarshalIndent(sortedResults, "", "  ")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Println(string(resultBytes))
 }
 
 type Result struct {
-	operator      string
-	bundleImage   string
-	bundleRelease string
-	bundleVersion string
-	ocpVersion    string
-	indexImage    string
-	indexNumber   string
-	generatedAt   time.Time
+	Operator      string    `json:"operator"`
+	BundleImage   string    `json:"bundleImage"`
+	BundleRelease string    `json:"bundleRelease"`
+	BundleVersion string    `json:"bundleVersion"`
+	OcpVersion    string    `json:"ocpVersion"`
+	IndexImage    string    `json:"indexImage"`
+	IndexNumber   string    `json:"indexNumber"`
+	GeneratedAt   time.Time `json:"generatedAt"`
 }
 
 type Messages struct {
