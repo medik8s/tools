@@ -69,11 +69,21 @@ func main() {
 			return
 		}
 
-		for i := 0; i < len(messages.RawMessages); i++ {
+		rawMessages := messages.RawMessages
+		// sort by release and not build date, in case a newer build was finished faster than an older one
+		sort.Slice(rawMessages, func(i, j int) bool {
+			getIdentifier := func(nvr string) string {
+				operator, version, release := getOperatorVersionReleaseFromNvr(nvr)
+				return fmt.Sprintf("%s-%s-%s", operator, version, release)
+			}
+			return getIdentifier(rawMessages[i].Msg.Artifact.Nvr) < getIdentifier(rawMessages[j].Msg.Artifact.Nvr)
+		})
+
+		for i := 0; i < len(rawMessages); i++ {
 			message := messages.RawMessages[i].Msg
 			ocpVersion := message.Index.OcpVersion
 			nvr := message.Artifact.Nvr
-			operator, release, version := getOperatorReleaseVersionFromNvr(nvr)
+			operator, version, release := getOperatorVersionReleaseFromNvr(nvr)
 			if _, exists := results[ocpVersion]; exists {
 				if _, exists := results[ocpVersion][operator]; exists {
 					if _, exists := results[ocpVersion][operator][version]; exists {
@@ -112,7 +122,7 @@ func main() {
 	printResults(results)
 }
 
-func getOperatorReleaseVersionFromNvr(nvr string) (string, string, string) {
+func getOperatorVersionReleaseFromNvr(nvr string) (string, string, string) {
 	match := "-bundle-container-"
 	index := strings.Index(nvr, match)
 	if index == -1 {
@@ -122,7 +132,7 @@ func getOperatorReleaseVersionFromNvr(nvr string) (string, string, string) {
 	operator := nvr[:index]
 	release := nvr[index+len(match):]
 	version := strings.Split(release, "-")[0]
-	return operator, release, version
+	return operator, version, release
 }
 
 func getNrFromIndexImage(indexImage string) string {
