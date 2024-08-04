@@ -1,0 +1,59 @@
+<html lang="en">
+<head>
+    <title>Find Index Image</title>
+
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- https://simplecss.org/ -->
+    <link rel="stylesheet" type="text/css" href="simple.min.css">
+    <link rel="stylesheet" type="text/css" href="style.css">
+
+    <!-- https://github.com/lovasoa/list.js -->
+    <!-- release v2.3.4 -->
+    <script src="list.js"></script>
+
+    <!-- cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" frontend/ui -->
+    <script src="wasm_exec.js"></script>
+    <script>
+        // list.js table, will be called by wasm
+        var resultsList
+        function newList(options) {
+            var listOptions = {
+                valueNames: options
+            };
+            resultsList = new List('results', listOptions);
+        }
+
+        // load wasm
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("ui.wasm"), go.importObject).then((result) => {
+            go.run(result.instance);
+        });
+
+    </script>
+
+</head>
+<body>
+
+<div>
+    <aside><div id="version"></div></aside>
+    <div>
+        <h1>Find Index Image</h1>
+        <button id="refresh">Reload index images</button>
+        <div id="msg" class="notice"></div>
+    </div>
+</div>
+
+<div id="results">
+    <label>
+        <input class="search" placeholder="Search" />
+    </label>
+    <table id="results-table">
+        <thead id="results-head"></thead>
+        <tbody id="results-body" class="list"></tbody>
+    </table>
+</div>
+
+</body>
+</html>
