@@ -87,7 +87,7 @@ func (p *Page) getVersion() {
 		p.msgDiv.SetInnerHTML(msg)
 		return
 	}
-	p.versionDiv.SetInnerHTML(string(body))
+	p.versionDiv.SetInnerHTML(fmt.Sprintf("Version v%s", string(body)))
 }
 
 func (p *Page) getData(reload bool) {
@@ -134,7 +134,7 @@ func (p *Page) fillTable(results []api.Result) {
 	}
 	tableHead := "<tr>"
 	tableOptions := make([]any, 0)
-	for _, header := range []string{"OCP version", "Operator", "Release", "Index Image", "Created at"} {
+	for _, header := range headers {
 		tableHead += fmt.Sprintf("<th>%v</th>\n", header)
 		tableOptions = append(tableOptions, trimHeader(header))
 	}
