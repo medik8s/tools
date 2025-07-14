@@ -1,0 +1,13 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: manual-stage-release-snr-0-9-1-8
+  namespace: rhwa-tenant
+spec:
+  releasePlan: snr-0-9-releaseplan-stage
+  snapshot: snr-0-9-zjs67
+  data:
+    releaseNotes:
+      type: RHBA
+      references:
+       - https://docs.redhat.com/en/documentation/workload_availability_for_red_hat_openshift/25.3
