@@ -4,7 +4,7 @@ metadata:
   name: snr-0-9-1-prod-ga
   namespace: rhwa-tenant
 spec:
-  releasePlan: snr-0-10-releaseplan-prod
+  releasePlan: snr-0-9-releaseplan-prod
   snapshot: snr-0-9-zjs67
   data:
     releaseNotes:
