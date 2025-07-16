@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: rhwa-25.5-fbc-418-prod-ga
+  namespace: rhwa-tenant
+spec:
+  releasePlan: far-0-5-fbc-418-releaseplan-prod
+  snapshot: far-0-5-fbc-418-bgxfp
