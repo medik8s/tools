@@ -12,6 +12,51 @@ spec:
     _Uses `buildah` to create a container image. It also optionally creates a source image and runs some build-time tests. EC will flag a violation for [`trusted_task.trusted`](https://enterprisecontract.dev/docs/ec-policies/release_policy.html#trusted_task__trusted) if any tasks are added to the pipeline.
     This pipeline is pushed as a Tekton bundle to [quay.io](https://quay.io/repository/konflux-ci/tekton-catalog/pipeline-docker-build?tab=tags)_
   finally:
+    - name: slack-webhook-notification-on-pr-failure
+      params: # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
+        - name: message
+          value: (pull) PipelineRun _$(context.pipelineRun.name)_ *Failed* :failed
+        - name: secret-name
+          value: slack-webhhok-rhwa
+        - name: key-name
+          value: slack-webhook
+      taskRef:
+        params:
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:452188df385218d0a1d9d097ff5daa67f11ae3597c917a3c2bb644787453a8e0
+          - name: name
+            value: slack-webhook-notification
+          - name: kind
+            value: Task
+        resolver: bundles
+      when:
+        - input: $(tasks.status)
+          operator: in
+          values: ["Failed"]
+        - input: $(params.is_pull_request)
+          operator: in
+          values: ["true"]
+    - name: slack-webhook-notification-on-push
+      params: # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
+        - name: message
+          value: PipelineRun _$(context.pipelineRun.name)_ *$(tasks.status)*
+        - name: secret-name
+          value: slack-webhhok-rhwa
+        - name: key-name
+          value: slack-webhook
+      taskRef:
+        params:
+          - name: bundle
+            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:452188df385218d0a1d9d097ff5daa67f11ae3597c917a3c2bb644787453a8e0
+          - name: name
+            value: slack-webhook-notification
+          - name: kind
+            value: Task
+        resolver: bundles
+      when:
+        - input: $(params.is_pull_request)
+          operator: in
+          values: ["false"]
     - name: show-sbom
       params:
         - name: IMAGE_URL
