@@ -171,6 +171,9 @@ spec:
       # Example: "main" or "release-0-10" for push, or "main-pr-123" or "feature-branch-pr-123" for pull-request
       name: artifact-version
       type: string
+    - description: Operator repo name, e.g., self-node-remediation.
+      name: repo-name
+      type: string
   results:
     - description: ""
       name: IMAGE_URL
@@ -444,6 +447,12 @@ spec:
           value: $(tasks.build-image-index.results.IMAGE_DIGEST)
         - name: image-url
           value: $(tasks.build-image-index.results.IMAGE_URL)
+        - name: SNYK_SECRET
+          value: "snyk-secret-rhwa"
+        - name: ARGS
+          value: "--project-name= $(params.repo-name) --report --org=b6dda4fc-c9ea-48da-ac45-67f75f258e5a"
+        - name: IGNORE_FILE_PATHS
+          value: "bundle/,Dockerfile,README.md"
       runAfter:
         - build-image-index
       taskRef:
