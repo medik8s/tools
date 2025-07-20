@@ -10,7 +10,7 @@
             "\\.yaml$"
         ],
         "includePaths": [
-            "shared-tekton-pipelines-rhwa/**"
+            "shared-tekton-pipelines/**"
         ],
         "automerge": true
     }
