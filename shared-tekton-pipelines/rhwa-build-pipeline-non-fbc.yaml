@@ -304,6 +304,7 @@ spec:
             - "release=$(params.artifact-version)-$(tasks.clone-repository.results.commit-timestamp)" # incorporating the artifact-version and timestamp
             - "version=$(params.semver-version)" # version label
             - "vcs-ref=$(tasks.clone-repository.results.commit)"
+            - "url=$(params.url)"
       runAfter:
         - prefetch-dependencies
         - generate-labels
