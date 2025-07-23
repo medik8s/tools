@@ -9,7 +9,7 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "main"
+      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline-non-fbc.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-pull-request.yaml".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: rhwa-tools
@@ -26,9 +26,9 @@ spec:
       - name: scmType
         value: gitlab
       - name: serverURL
-        value: https://gitlab.com
+        value: https://gitlab.cee.redhat.com
       - name: url
-        value: https://gitlab.cee.redhat.com/dragonfly/tools.git # URL to the repo hosting the pipeline
+        value: '{{source_url}}' # URL to the repo hosting the pipeline
       - name: revision
         value: dummy-tekton-verify-shared-pipeline # Or a specific commit SHA or tag for versioning
       - name: pathInRepo
@@ -45,7 +45,7 @@ spec:
     - name: output-image
       value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:{{revision}}
     - name: is_pull_request
-      value: "false"
+      value: "true"
   taskRunTemplate:
     serviceAccountName: build-pipeline-rhwa-tekton-tools
   workspaces:
