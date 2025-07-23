@@ -93,14 +93,16 @@ spec:
         - name: workspace
           workspace: workspace
   params:
-    - description: Source Repository URL
+    - default: ""
+      description: Source Repository URL
       name: git-url
       type: string
     - default: ""
       description: Revision of the Source Repository
       name: revision
       type: string
-    - description: Fully Qualified Output Image
+    - default: ""
+      description: Fully Qualified Output Image
       name: output-image
       type: string
     - default: .
@@ -171,10 +173,12 @@ spec:
       # Example: "main" or "release-0-10" for push, or "main-pr-123" or "feature-branch-pr-123" for pull-request
       name: artifact-version
       type: string
-    - description: Identify whether the PipelineRun is a pull_request or push tekton file
+    - default: "true"
+      description: Identify whether the PipelineRun is a pull_request or push tekton file
       name: is_pull_request
       type: string
-    - description: Operator repo name, e.g., self-node-remediation.
+    - default: "none"
+      description: Operator repo name, e.g., self-node-remediation.
       name: repo-name
       type: string
     - default: ""
