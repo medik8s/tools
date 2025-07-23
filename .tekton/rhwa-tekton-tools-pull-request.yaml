@@ -28,9 +28,9 @@ spec:
       - name: serverURL
         value: https://gitlab.cee.redhat.com
       - name: url
-        value: '{{source_url}}' # URL to the repo hosting the pipeline
+        value: https://gitlab.cee.redhat.com/dragonfly/tools.git # URL to the repo hosting the pipeline
       - name: revision
-        value: dummy-tekton-verify-shared-pipeline # Or a specific commit SHA or tag for versioning
+        value: main # Or a specific commit SHA or tag for versioning
       - name: pathInRepo
         value: shared-tekton-pipelines/rhwa-build-pipeline-non-fbc.yaml # Path to the Pipeline YAML file within that repo
       - name: token
