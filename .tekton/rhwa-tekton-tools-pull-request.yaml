@@ -21,22 +21,12 @@ spec:
   pipelineRef:
     resolver: git
     params:
-      - name: org
-        value: redhat
-      - name: scmType
-        value: gitlab
-      - name: serverURL
-        value: https://gitlab.cee.redhat.com
       - name: url
-        value: https://gitlab.cee.redhat.com/dragonfly/tools.git # URL to the repo hosting the pipeline
+        value: '{{source_url}}' # URL to the repo hosting the pipeline
       - name: revision
-        value: main # Or a specific commit SHA or tag for versioning
+        value: '{{revision}}' # Or a specific commit SHA or tag for versioning
       - name: pathInRepo
         value: shared-tekton-pipelines/rhwa-build-pipeline-non-fbc.yaml # Path to the Pipeline YAML file within that repo
-      - name: token
-        value: pipelines-as-code-secret-rhwa
-      - name: tokenKey
-        value: stringData 
   params:
     - name: git-url # This is the source_url for the component being built
       value: '{{source_url}}'
