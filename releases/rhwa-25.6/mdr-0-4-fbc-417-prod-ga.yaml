@@ -5,4 +5,4 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: mdr-0-4-fbc-417-releaseplan-prod
-  snapshot: mdr-0-4-fbc-417-k6xgk
+  snapshot: mdr-0-4-fbc-417-zkntt

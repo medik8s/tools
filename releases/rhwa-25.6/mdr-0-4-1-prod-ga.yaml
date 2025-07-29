@@ -5,7 +5,7 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: mdr-0-4-releaseplan-prod
-  snapshot: mdr-0-4-dt2h6
+  snapshot: mdr-0-4-bbn5z
   data:
     releaseNotes:
       type: RHEA
