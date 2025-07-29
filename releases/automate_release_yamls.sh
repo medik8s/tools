@@ -17,13 +17,12 @@ create_fbc_releases_operator() {
     # The ${1?err_str} syntax will cause the script to exit with an error if the argument is not provided.
     local release="${1?$err_str}"
     local operator_version="${2?$err_str}"
-    local ocp="${3?$err_str}"
-    local snapshot_suffix="${4?$err_str}"
+    local snapshot_suffix="${3?$err_str}"
     # Assign the 5th argument to is_stage, defaulting to "stage" if it's not provided.
-    local is_stage="${5:-"stage"}"
-
+    local is_stage="${4:-"stage"}"
+    local type="${5:-"RHEA"}" # RHEA, RHBA, RHSA, etc.  Default to RHEA if not provided.
     # Construct the final output filename based on the user's request.
-    local output_filename="rhwa-${release}/${operator_version}-fbc-${ocp}-${is_stage}-ga.yaml"
+    local output_filename="rhwa-${release}/${operator_version}-1-${is_stage}-ga.yaml"
 
     # Create the YAML file using a 'here document'.
     # The content between cat <<EOF and EOF is written to the specified output file.
@@ -31,11 +30,16 @@ create_fbc_releases_operator() {
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
-  name: rhwa-${release}-${operator_version}-fbc-${ocp}-${is_stage}-ga
+  name: ${operator_version}-1-${is_stage}-ga
   namespace: rhwa-tenant
 spec:
-  releasePlan: ${operator_version}-fbc-${ocp}-releaseplan-${is_stage}
-  snapshot: ${operator_version}-fbc-${ocp}-${snapshot_suffix}
+  releasePlan: ${operator_version}-releaseplan-${is_stage}
+  snapshot: ${operator_version}-${snapshot_suffix}
+  data:
+    releaseNotes:
+      type: ${type}
+      references:
+       - https://docs.redhat.com/en/documentation/workload_availability_for_red_hat_openshift/${release}
 EOF
 
     # Inform the user that the file has been created successfully.

@@ -1,10 +1,10 @@
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
-  name: manual-stage-release-mdr-0-4-1-6
+  name: mdr-0-4-1-prod-ga
   namespace: rhwa-tenant
 spec:
-  releasePlan: mdr-0-4-releaseplan-stage
+  releasePlan: mdr-0-4-releaseplan-prod
   snapshot: mdr-0-4-dt2h6
   data:
     releaseNotes:

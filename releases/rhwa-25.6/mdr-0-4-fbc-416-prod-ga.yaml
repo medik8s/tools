@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: rhwa-25.6-mdr-0-4-fbc-416-prod-ga
+  namespace: rhwa-tenant
+spec:
+  releasePlan: mdr-0-4-fbc-416-releaseplan-prod
+  snapshot: mdr-0-4-fbc-416-hh9r6
