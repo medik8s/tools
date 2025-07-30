@@ -34,6 +34,8 @@ spec:
       value: '{{revision}}'
     - name: output-image
       value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:{{revision}}
+    - name: dockerfile
+      value: Containerfie.dummy
     - name: is_pull_request
       value: "true"
   taskRunTemplate:

@@ -1,0 +1,5 @@
+FROM registry.redhat.io/ubi9/ubi:9.6-1747219013
+WORKDIR /app
+COPY README.md .
+RUN echo "Building the dummy image..." && ls -l
+CMD ["tail", "-f", "/dev/null"]
