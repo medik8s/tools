@@ -23,7 +23,7 @@ create_fbc_releases_operator() {
     local is_stage="${5:-"stage"}"
 
     # Construct the final output filename based on the user's request.
-    local output_filename="rhwa-${release}/${operator_version}-fbc-${ocp}-${is_stage}-ga.yaml"
+    local output_filename="releases/rhwa-${release}/rhwa-${release}-fbc-${ocp}-${is_stage}-ga.yaml"
 
     # Create the YAML file using a 'here document'.
     # The content between cat <<EOF and EOF is written to the specified output file.
@@ -31,7 +31,7 @@ create_fbc_releases_operator() {
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
-  name: rhwa-${release}-${operator_version}-fbc-${ocp}-${is_stage}-ga
+  name: rhwa-${release}-fbc-${ocp}-${is_stage}-ga
   namespace: rhwa-tenant
 spec:
   releasePlan: ${operator_version}-fbc-${ocp}-releaseplan-${is_stage}
@@ -42,8 +42,3 @@ EOF
     echo "" # Add a newline for better formatting
     echo "Success! YAML file created: ${output_filename}"
 }
-
-# --- Main Script Execution ---
-# Pass all command-line arguments received by the script ("$@") to the function.
-# The function itself will validate that the required arguments have been provided.
-create_fbc_releases_operator "$@"
