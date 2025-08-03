@@ -1,0 +1,13 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: manual-release-nhc-0-9-1-2
+  namespace: rhwa-tenant
+spec:
+  releasePlan: nhc-0-9-releaseplan-stage
+  snapshot: nhc-0-9-xgsnd
+  data:
+    releaseNotes:
+      type: RHEA
+      references:
+       - https://docs.redhat.com/en/documentation/workload_availability_for_red_hat_openshift/25.7
