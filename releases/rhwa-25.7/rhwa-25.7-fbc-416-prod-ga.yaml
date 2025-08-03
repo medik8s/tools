@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: rhwa-25.7-fbc-416-prod-ga
+  namespace: rhwa-tenant
+spec:
+  releasePlan: nhc-0-9-fbc-416-releaseplan-prod
+  snapshot: nhc-0-9-fbc-416-r9rzk
