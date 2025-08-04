@@ -8,13 +8,13 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-push.yaml".pathChanged() )
+      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline-fbc.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-push-fbc.yaml".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: rhwa-tools
     appstudio.openshift.io/component: rhwa-tekton-tools
     pipelines.appstudio.openshift.io/type: build
-  name: rhwa-tekton-tools-on-push
+  name: rhwa-tekton-tools-on-push-fbc
   namespace: rhwa-tenant
 spec:
   pipelineRef:
@@ -32,9 +32,9 @@ spec:
     - name: revision # This is the revision for the component being built
       value: '{{revision}}'
     - name: output-image
-      value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:{{revision}}
+      value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:fbc-{{revision}}
     - name: dockerfile
-      value: containers/Containerfile.dummy
+      value: containers/Containerfile.dummy-catalog
     - name: is_pull_request
       value: "false"
   taskRunTemplate:
