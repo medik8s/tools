@@ -1,9 +1,9 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: rhwa-build-pipeline-non-fbc
+  name: rhwa-build-pipeline
   labels:
-      pipelines.openshift.io/used-by: rhwa-non-fbc-tekton
+      pipelines.openshift.io/used-by: rhwa-tekton
 spec:
   description: |
     This pipeline is ideal for building container images from a Containerfile while reducing network traffic.

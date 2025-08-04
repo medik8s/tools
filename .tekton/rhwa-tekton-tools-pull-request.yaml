@@ -9,7 +9,7 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline-non-fbc.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-pull-request.yaml".pathChanged() )
+      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-pull-request.yaml".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: rhwa-tools
@@ -26,16 +26,16 @@ spec:
       - name: revision
         value: '{{revision}}' # Or a specific commit SHA or tag for versioning
       - name: pathInRepo
-        value: shared-tekton-pipelines/rhwa-build-pipeline-non-fbc.yaml # Path to the Pipeline YAML file within that repo
+        value: shared-tekton-pipelines/rhwa-build-pipeline.yaml # Path to the Pipeline YAML file within that repo
   params:
     - name: git-url # This is the source_url for the component being built
       value: '{{source_url}}'
     - name: revision # This is the revision for the component being built
       value: '{{revision}}'
     - name: output-image
-      value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:{{revision}}
+      value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:on-pr-{{revision}}
     - name: dockerfile
-      value: Containerfie.dummy
+      value: containers/Containerfie.dummy
     - name: is_pull_request
       value: "true"
   taskRunTemplate:
