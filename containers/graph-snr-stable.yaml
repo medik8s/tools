@@ -1,0 +1,42 @@
+schema: olm.template.basic
+name: self-node-remediation
+entries:
+  - entries:
+      - name: self-node-remediation.v0.7.1
+        skipRange: '>=0.5.0 <0.7.1'
+      - name: self-node-remediation.v0.8.0
+        replaces: self-node-remediation.v0.7.1
+        skipRange: '>=0.7.0 <0.8.0'
+      - name: self-node-remediation.v0.9.0
+        replaces: self-node-remediation.v0.8.0
+        skipRange: '>=0.7.0 <0.9.0'
+      - name: self-node-remediation.v0.10.0
+        replaces: self-node-remediation.v0.9.0
+        skipRange: '>=0.9.0 <0.10.0'
+      - name: self-node-remediation.v0.10.1
+        replaces: self-node-remediation.v0.10.0
+        skipRange: '>=0.9.0 <0.10.1'
+      - name: self-node-remediation.v0.10.2
+        replaces: self-node-remediation.v0.10.1
+        skipRange: '>=0.9.0 <0.10.2'
+    name: stable
+    package: self-node-remediation
+    schema: olm.channel
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:1267b3f113652d675c9fb24bb191e8d23f3b88a36dff89469fd88da80006e463 
+    # snr-bundle-registry v0.10.2
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:81a323c6d742e7105f0b04a8fb4bab473905d73ceb6315ccdb346dc40211e04e
+    # snr-bundle-registry v0.10.1
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:30bb8bde40f836e69ecb52a05f40891d914327a15fd19d87b441a0b6f68c942b
+    # snr-bundle-registry v0.10.0
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:a64f67f29a4eb8ce426ed842f1a5a5fcd83fd9d91acebb064cf65c89c9d8bfb6
+    # snr-bundle-registry v0.9.0
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:e2f807904f12f5bdd58fe7293d2e2dc93c5517e86c4abe19a484ca2c9edc52a4
+    # snr-bundle-registry v0.8.0
+  - schema: olm.bundle
+    image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:9e8bcbff46b97f3bc1071146b8db233abd1630016e6fc0efb679df8243c6fd03
+    # snr-bundle-registry v0.7.1

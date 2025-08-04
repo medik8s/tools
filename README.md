@@ -1,5 +1,15 @@
 # tools
 
+## Intro to tools
+
+This repo is aimed to include many Dragonfly project files that are common to all.
+The repo layout is:
+
+- `releases` directory for RHWA release CRs
+- `shared-tekton-pipelines` directory for the shared Tekton Pipelines which are used in many Dragonfly operators under RHWA product
+- `renovate.json` for Mintmaker/Renovate configuration of automatic MR to update the shared Tekton Pipelines tasks
+- `.tekton` directory for PR and push Tekton PipelineRuns that test the Tekton Pipelines from shared-tekton-pipelines for CI/CD
+- `containers` directory for dummy containerfiles (of regular and fbc images) that are used in the container build of the Tekton PipelineRuns under `.tekton` directory
 
 
 ## Getting started

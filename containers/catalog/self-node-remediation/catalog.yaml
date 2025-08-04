@@ -1,0 +1,1173 @@
+schema: olm.package
+name: self-node-remediation
+defaultChannel: stable
+---
+entries:
+- name: self-node-remediation.v0.7.1
+  skipRange: '>=0.5.0 <0.7.1'
+- name: self-node-remediation.v0.8.0
+  replaces: self-node-remediation.v0.7.1
+  skipRange: '>=0.7.0 <0.8.0'
+- name: self-node-remediation.v0.9.0
+  replaces: self-node-remediation.v0.8.0
+  skipRange: '>=0.7.0 <0.9.0'
+- name: self-node-remediation.v0.10.0
+  replaces: self-node-remediation.v0.9.0
+  skipRange: '>=0.9.0 <0.10.0'
+- name: self-node-remediation.v0.10.1
+  replaces: self-node-remediation.v0.10.0
+  skipRange: '>=0.9.0 <0.10.1'
+- name: self-node-remediation.v0.10.2
+  replaces: self-node-remediation.v0.10.1
+  skipRange: '>=0.9.0 <0.10.2'
+name: stable
+package: self-node-remediation
+schema: olm.channel
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:30bb8bde40f836e69ecb52a05f40891d914327a15fd19d87b441a0b6f68c942b
+name: self-node-remediation.v0.10.0
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.10.0
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:be5d89d6794bc1a50c59386e8be960e9f13c9668c8e024ff0c32ba23ee75956a
+      createdAt: "2025-01-13 12:00:29"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      features.operators.openshift.io/disconnected: "true"
+      features.operators.openshift.io/fips-compliant: "true"
+      features.operators.openshift.io/proxy-aware: "false"
+      features.operators.openshift.io/tls-profiles: "false"
+      features.operators.openshift.io/token-auth-aws: "false"
+      features.operators.openshift.io/token-auth-azure: "false"
+      features.operators.openshift.io/token-auth-gcp: "false"
+      olm.skipRange: '>=0.9.0 <0.10.0'
+      operatorframework.io/suggested-namespace: openshift-workload-availability
+      operatorframework.io/suggested-namespace-template: '{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"openshift-workload-availability","annotations":{"openshift.io/node-selector":""}}}'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.33.0
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/25.1/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.25.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/openshift4/ose-kube-rbac-proxy-rhel9@sha256:3fcd8e2bf0bcb8ff8c93a87af2c59a3bcae7be8792f9d3236c9b5bbd9b6db3b2
+  name: kube-rbac-proxy
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:30bb8bde40f836e69ecb52a05f40891d914327a15fd19d87b441a0b6f68c942b
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:be5d89d6794bc1a50c59386e8be960e9f13c9668c8e024ff0c32ba23ee75956a
+  name: self-node-remediation-rhel9-operator-be5d89d6794bc1a50c59386e8be960e9f13c9668c8e024ff0c32ba23ee75956a-annotation
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:be5d89d6794bc1a50c59386e8be960e9f13c9668c8e024ff0c32ba23ee75956a
+  name: manager
+schema: olm.bundle
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:81a323c6d742e7105f0b04a8fb4bab473905d73ceb6315ccdb346dc40211e04e
+name: self-node-remediation.v0.10.1
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.10.1
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:77da2c3841aa84e02a0ceca2e145382ada05e51a124151e6c8a230e4f42e7967
+      createdAt: "2025-06-19 07:05:24"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      features.operators.openshift.io/cnf: "false"
+      features.operators.openshift.io/cni: "false"
+      features.operators.openshift.io/csi: "false"
+      features.operators.openshift.io/disconnected: "true"
+      features.operators.openshift.io/fips-compliant: "true"
+      features.operators.openshift.io/proxy-aware: "false"
+      features.operators.openshift.io/tls-profiles: "false"
+      features.operators.openshift.io/token-auth-aws: "false"
+      features.operators.openshift.io/token-auth-azure: "false"
+      features.operators.openshift.io/token-auth-gcp: "false"
+      olm.skipRange: '>=0.9.0 <0.10.1'
+      operatorframework.io/suggested-namespace: openshift-workload-availability
+      operatorframework.io/suggested-namespace-template: '{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"openshift-workload-availability","annotations":{"openshift.io/node-selector":""}}}'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.33.0
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/25.2/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.25.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/openshift4/ose-kube-rbac-proxy-rhel9@sha256:d37a6d10b0fa07370066a31fdaffe2ea553faf4e4e98be7fcef5ec40d62ffe29
+  name: kube-rbac-proxy
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:81a323c6d742e7105f0b04a8fb4bab473905d73ceb6315ccdb346dc40211e04e
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:77da2c3841aa84e02a0ceca2e145382ada05e51a124151e6c8a230e4f42e7967
+  name: manager
+schema: olm.bundle
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:1267b3f113652d675c9fb24bb191e8d23f3b88a36dff89469fd88da80006e463
+name: self-node-remediation.v0.10.2
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.10.2
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:a774c6cef3941555f22631096670c6c861be34df319052e3dcdb6ee4aca6fb72
+      createdAt: "2025-07-02 18:34:25"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      features.operators.openshift.io/cnf: "false"
+      features.operators.openshift.io/cni: "false"
+      features.operators.openshift.io/csi: "false"
+      features.operators.openshift.io/disconnected: "true"
+      features.operators.openshift.io/fips-compliant: "true"
+      features.operators.openshift.io/proxy-aware: "false"
+      features.operators.openshift.io/tls-profiles: "false"
+      features.operators.openshift.io/token-auth-aws: "false"
+      features.operators.openshift.io/token-auth-azure: "false"
+      features.operators.openshift.io/token-auth-gcp: "false"
+      olm.skipRange: '>=0.9.0 <0.10.2'
+      operatorframework.io/suggested-namespace: openshift-workload-availability
+      operatorframework.io/suggested-namespace-template: '{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"openshift-workload-availability","annotations":{"openshift.io/node-selector":""}}}'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.33.0
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/25.3/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.25.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/openshift4/ose-kube-rbac-proxy-rhel9@sha256:d37a6d10b0fa07370066a31fdaffe2ea553faf4e4e98be7fcef5ec40d62ffe29
+  name: kube-rbac-proxy
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:1267b3f113652d675c9fb24bb191e8d23f3b88a36dff89469fd88da80006e463
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel9-operator@sha256:a774c6cef3941555f22631096670c6c861be34df319052e3dcdb6ee4aca6fb72
+  name: manager
+schema: olm.bundle
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:9e8bcbff46b97f3bc1071146b8db233abd1630016e6fc0efb679df8243c6fd03
+name: self-node-remediation.v0.7.1
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.7.1
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:e2048a8a2ec37e10b57dafeba2e131311e61982242cda4beb989e5e30c1a5537
+      createdAt: "2023-10-20 15:32:20"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      olm.skipRange: '>=0.5.0 <0.7.1'
+      operators.openshift.io/infrastructure-features: '["disconnected"]'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.28.1
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/23.2/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.20.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:9e8bcbff46b97f3bc1071146b8db233abd1630016e6fc0efb679df8243c6fd03
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:e2048a8a2ec37e10b57dafeba2e131311e61982242cda4beb989e5e30c1a5537
+  name: self-node-remediation-rhel8-operator-e2048a8a2ec37e10b57dafeba2e131311e61982242cda4beb989e5e30c1a5537-annotation
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:e2048a8a2ec37e10b57dafeba2e131311e61982242cda4beb989e5e30c1a5537
+  name: manager
+schema: olm.bundle
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:e2f807904f12f5bdd58fe7293d2e2dc93c5517e86c4abe19a484ca2c9edc52a4
+name: self-node-remediation.v0.8.0
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.8.0
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:49c42a21df0779ac93563808464ba06475d34602a802e390a30b4762dd9e1f73
+      createdAt: "2024-02-06 08:32:38"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      features.operators.openshift.io/disconnected: "true"
+      features.operators.openshift.io/fips-compliant: "false"
+      features.operators.openshift.io/proxy-aware: "false"
+      features.operators.openshift.io/tls-profiles: "false"
+      features.operators.openshift.io/token-auth-aws: "false"
+      features.operators.openshift.io/token-auth-azure: "false"
+      features.operators.openshift.io/token-auth-gcp: "false"
+      olm.skipRange: '>=0.7.0 <0.8.0'
+      operatorframework.io/suggested-namespace: openshift-workload-availability
+      operatorframework.io/suggested-namespace-template: '{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"openshift-workload-availability","annotations":{"openshift.io/node-selector":""}}}'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.32.0
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/24.1/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.25.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:e2f807904f12f5bdd58fe7293d2e2dc93c5517e86c4abe19a484ca2c9edc52a4
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:49c42a21df0779ac93563808464ba06475d34602a802e390a30b4762dd9e1f73
+  name: self-node-remediation-rhel8-operator-49c42a21df0779ac93563808464ba06475d34602a802e390a30b4762dd9e1f73-annotation
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:49c42a21df0779ac93563808464ba06475d34602a802e390a30b4762dd9e1f73
+  name: manager
+schema: olm.bundle
+---
+image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:a64f67f29a4eb8ce426ed842f1a5a5fcd83fd9d91acebb064cf65c89c9d8bfb6
+name: self-node-remediation.v0.9.0
+package: self-node-remediation
+properties:
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediation
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationConfig
+    version: v1alpha1
+- type: olm.gvk
+  value:
+    group: self-node-remediation.medik8s.io
+    kind: SelfNodeRemediationTemplate
+    version: v1alpha1
+- type: olm.package
+  value:
+    packageName: self-node-remediation
+    version: 0.9.0
+- type: olm.csv.metadata
+  value:
+    annotations:
+      alm-examples: |-
+        [
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediation",
+            "metadata": {
+              "name": "selfnoderemediation-sample"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationConfig",
+            "metadata": {
+              "name": "self-node-remediation-config",
+              "namespace": "self-node-remediation"
+            },
+            "spec": {}
+          },
+          {
+            "apiVersion": "self-node-remediation.medik8s.io/v1alpha1",
+            "kind": "SelfNodeRemediationTemplate",
+            "metadata": {
+              "name": "selfnoderemediationtemplate-sample"
+            },
+            "spec": {
+              "template": {
+                "spec": {}
+              }
+            }
+          }
+        ]
+      capabilities: Basic Install
+      categories: OpenShift Optional
+      containerImage: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:771c5ba544599518e60c1c50e01cc7c951299255ce7f30a8b6e1bb9b127c6697
+      createdAt: "2024-07-10 00:59:51"
+      description: Self Node Remediation Operator for remediate itself in case of
+        a failure.
+      features.operators.openshift.io/disconnected: "true"
+      features.operators.openshift.io/fips-compliant: "false"
+      features.operators.openshift.io/proxy-aware: "false"
+      features.operators.openshift.io/tls-profiles: "false"
+      features.operators.openshift.io/token-auth-aws: "false"
+      features.operators.openshift.io/token-auth-azure: "false"
+      features.operators.openshift.io/token-auth-gcp: "false"
+      olm.skipRange: '>=0.7.0 <0.9.0'
+      operatorframework.io/suggested-namespace: openshift-workload-availability
+      operatorframework.io/suggested-namespace-template: '{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"openshift-workload-availability","annotations":{"openshift.io/node-selector":""}}}'
+      operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine",
+        "OpenShift Container Platform", "OpenShift Platform Plus"]'
+      operators.operatorframework.io/builder: operator-sdk-v1.33.0
+      operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+      repository: https://github.com/medik8s/self-node-remediation
+      support: Red Hat
+    apiServiceDefinitions: {}
+    crdDescriptions:
+      owned:
+      - description: SelfNodeRemediationConfig is the Schema for the selfnoderemediationconfigs
+          API in which a user can configure the self node remediation agents
+        displayName: Self Node Remediation Config
+        kind: SelfNodeRemediationConfig
+        name: selfnoderemediationconfigs.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationConfig
+          name: selfnoderemediationconfigs
+          version: v1alpha1
+        version: v1alpha1
+      - description: SelfNodeRemediation is the Schema for the selfnoderemediations
+          API
+        displayName: Self Node Remediation
+        kind: SelfNodeRemediation
+        name: selfnoderemediations.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediation
+          name: selfnoderemediations
+          version: v1alpha1
+        statusDescriptors:
+        - description: 'Represents the observations of a SelfNodeRemediation''s current
+            state. Known .status.conditions.type are: "Processing"'
+          displayName: conditions
+          path: conditions
+          x-descriptors:
+          - urn:alm:descriptor:com.tectonic.ui:conditions
+        - description: LastError captures the last error that occurred during remediation.
+            If no error occurred it would be empty
+          displayName: Last Error
+          path: lastError
+        - description: 'Phase represents the current phase of remediation, One of:
+            TBD'
+          displayName: Phase
+          path: phase
+        - description: TimeAssumedRebooted is the time by then the unhealthy node
+            assumed to be rebooted
+          displayName: Time Assumed Rebooted
+          path: timeAssumedRebooted
+        version: v1alpha1
+      - description: SelfNodeRemediationTemplate is the Schema for the selfnoderemediationtemplates
+          API
+        displayName: Self Node Remediation Template
+        kind: SelfNodeRemediationTemplate
+        name: selfnoderemediationtemplates.self-node-remediation.medik8s.io
+        resources:
+        - kind: SelfNodeRemediationTemplate
+          name: selfnoderemediationtemplates
+          version: v1alpha1
+        specDescriptors:
+        - description: Template defines the desired state of SelfNodeRemediationTemplate
+          displayName: Template
+          path: template
+        version: v1alpha1
+    description: This self node remediation operator is using an alternate mechanism
+      for a node in a cluster to detect its health status and take actions to remediate
+      itself in case of a failure. While not all remediation events can result in
+      the node returning to a healthy state, the operator does allow surviving parts
+      of the cluster to assume the node has reached a safe state so that it’s workloads
+      can be automatically recovered. A prerequisite for the Self Node Remediation
+      operator is a functioning health detection system that implements the external
+      remediation API, such as Node Health Check Operator or Machine Health Check
+      Controller (in OCP or Cluster-API based clusters). Once a node/machine is unhealthy,
+      the detection system will create the SelfNodeRemediation CR, which triggers
+      the Self Node Remediation Operator. For this the configuration of the health
+      detection system needs to refer to a SelfNodeRemediationTemplate CR. Such a
+      template is created by default in the operator's namespace, for usage in other
+      namespaces it needs to be created manually. The Node Health Check Operator is
+      configured to use Self Node Remediation by default.
+    displayName: Self Node Remediation Operator
+    installModes:
+    - supported: false
+      type: OwnNamespace
+    - supported: false
+      type: SingleNamespace
+    - supported: false
+      type: MultiNamespace
+    - supported: true
+      type: AllNamespaces
+    keywords:
+    - fencing
+    - remediation
+    - auto-healing
+    - recovery
+    - high-availability
+    - baremetal
+    - SNR
+    links:
+    - name: Self Node Remediation
+      url: https://access.redhat.com/documentation/en-us/workload_availability_for_red_hat_openshift/24.3/html/remediation_fencing_and_maintenance.html
+    - name: Source Code
+      url: https://github.com/medik8s/self-node-remediation
+    maintainers:
+    - email: team-dragonfly@redhat.com
+      name: Dragonfly Team
+    maturity: alpha
+    minKubeVersion: 1.25.0
+    provider:
+      name: Red Hat
+      url: https://www.redhat.com
+relatedImages:
+- image: registry.redhat.io/openshift4/ose-kube-rbac-proxy@sha256:518691d157b3e3b5031a2b1e4cc3f415839536079bb8570ae8690ac92d302ba0
+  name: kube-rbac-proxy
+- image: registry.redhat.io/workload-availability/self-node-remediation-operator-bundle@sha256:a64f67f29a4eb8ce426ed842f1a5a5fcd83fd9d91acebb064cf65c89c9d8bfb6
+  name: ""
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:771c5ba544599518e60c1c50e01cc7c951299255ce7f30a8b6e1bb9b127c6697
+  name: self-node-remediation-rhel8-operator-771c5ba544599518e60c1c50e01cc7c951299255ce7f30a8b6e1bb9b127c6697-annotation
+- image: registry.redhat.io/workload-availability/self-node-remediation-rhel8-operator@sha256:771c5ba544599518e60c1c50e01cc7c951299255ce7f30a8b6e1bb9b127c6697
+  name: manager
+schema: olm.bundle
