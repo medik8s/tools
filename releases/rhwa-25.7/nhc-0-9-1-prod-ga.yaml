@@ -5,7 +5,7 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: nhc-0-9-releaseplan-prod
-  snapshot: nhc-0-9-xgsnd
+  snapshot: nhc-0-9-7d8v6
   data:
     releaseNotes:
       type: RHEA
