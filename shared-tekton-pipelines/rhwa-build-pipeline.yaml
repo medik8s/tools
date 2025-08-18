@@ -188,10 +188,6 @@ spec:
       description: Activation key name. Used for FAR to get subscription and install the desired well known fence agents.
       name: activation-key
       type: string
-    - default: "false"
-      description: Enable in-development package managers. Used for FAR to get subscription and install the desired well known fence agents.
-      name: dev-package-managers 
-      type: string
   results:
     - description: ""
       name: IMAGE_URL
@@ -256,8 +252,6 @@ spec:
           value: $(params.prefetch-input)
         - name: ACTIVATION_KEY
           value: $(params.activation-key)
-        - name: dev-package-managers 
-          value: $(params.dev-package-manager)
       runAfter:
         - clone-repository
       taskRef:
