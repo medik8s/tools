@@ -188,6 +188,10 @@ spec:
       description: Activation key name. Used for FAR to get subscription and install the desired well known fence agents.
       name: activation-key
       type: string
+    - default: ""
+      description: CPE of the operator
+      name: cpe
+      type: string
   results:
     - description: ""
       name: IMAGE_URL
@@ -318,6 +322,7 @@ spec:
             - "version=$(params.semver-version)" # version label
             - "vcs-ref=$(tasks.clone-repository.results.commit)"
             - "url=$(params.rhwa-url)"
+            - "cpe=$(params.cpe)"
       runAfter:
         - prefetch-dependencies
         - generate-labels
