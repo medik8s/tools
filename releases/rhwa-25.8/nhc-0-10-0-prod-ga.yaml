@@ -17,7 +17,19 @@ spec:
             source: issues.redhat.com
           - id: RHWA-62
             source: issues.redhat.com
+          - id: RHWA-66
+            source: issues.redhat.com
           - id: RHWA-88
+            source: issues.redhat.com
+          - id: RHWA-255
+            source: issues.redhat.com
+          - id: RHWA-264
+            source: issues.redhat.com
+          - id: RHWA-269
+            source: issues.redhat.com
+          - id: RHWA-275
+            source: issues.redhat.com
+          - id: RHWA-278
             source: issues.redhat.com
       references:
        - https://docs.redhat.com/en/documentation/workload_availability_for_red_hat_openshift/25.9

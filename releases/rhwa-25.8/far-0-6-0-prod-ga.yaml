@@ -11,9 +11,19 @@ spec:
       type: RHBA
       issues: 
         fixed:
-          - id: RHWA-285
+          - id: RHWA-3
+            source: issues.redhat.com
+          - id: RHWA-97
+            source: issues.redhat.com
+          - id: RHWA-273
+            source: issues.redhat.com
+          - id: RHWA-274
             source: issues.redhat.com
           - id: RHWA-276
+            source: issues.redhat.com
+          - id: RHWA-283
+            source: issues.redhat.com
+          - id: RHWA-285
             source: issues.redhat.com
       references:
        - https://docs.redhat.com/en/documentation/workload_availability_for_red_hat_openshift/25.9
