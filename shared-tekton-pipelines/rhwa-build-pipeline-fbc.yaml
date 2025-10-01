@@ -3,7 +3,7 @@ kind: Pipeline
 metadata:
   name: rhwa-build-pipeline-fbc
   labels:
-      pipelines.openshift.io/used-by: rhwa-fbc-tekton
+    pipelines.openshift.io/used-by: rhwa-fbc-tekton
 spec:
   description: |
     This pipeline is ideal for building and verifying [file-based catalogs](https://konflux-ci.dev/docs/end-to-end/building-olm/#building-the-file-based-catalog).
@@ -132,6 +132,10 @@ spec:
     - description: Identify whether the PipelineRun is a pull_request or push tekton file
       name: is_pull_request
       type: string
+    - name: buildah-format
+      default: oci
+      type: string
+      description: The format for the resulting image's mediaType. Valid values are oci or docker.
   results:
     - description: ""
       name: IMAGE_URL
@@ -159,7 +163,7 @@ spec:
           - name: name
             value: init
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:ec962d0be18f36ca7d331c99bf243800f569fc0a2ea6f8c8c3d3a574b71c44dc
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:526a104a3342e36dad5c5e7f98c647da6b2a33897e458f772ff4afe523e0690a
           - name: kind
             value: task
         resolver: bundles
@@ -250,6 +254,8 @@ spec:
           value: $(tasks.prefetch-dependencies.results.CACHI2_ARTIFACT)
         - name: IMAGE_APPEND_PLATFORM
           value: "true"
+        - name: BUILDAH_FORMAT
+          value: $(params.buildah-format)
       runAfter:
         - clone-repository
       taskRef:
@@ -279,6 +285,8 @@ spec:
         - name: IMAGES
           value:
             - $(tasks.build-images.results.IMAGE_REF[*])
+        - name: BUILDAH_FORMAT
+          value: $(params.buildah-format)
       runAfter:
         - build-images
       taskRef:

@@ -3,7 +3,7 @@ kind: Pipeline
 metadata:
   name: rhwa-build-pipeline
   labels:
-      pipelines.openshift.io/used-by: rhwa-tekton
+    pipelines.openshift.io/used-by: rhwa-tekton
 spec:
   description: |
     This pipeline is ideal for building container images from a Containerfile while reducing network traffic.
@@ -192,6 +192,10 @@ spec:
       description: CPE of the operator
       name: cpe
       type: string
+    - name: buildah-format
+      default: docker
+      type: string
+      description: The format for the resulting image's mediaType. Valid values are oci or docker.
   results:
     - description: ""
       name: IMAGE_URL
@@ -219,7 +223,7 @@ spec:
           - name: name
             value: init
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:ec962d0be18f36ca7d331c99bf243800f569fc0a2ea6f8c8c3d3a574b71c44dc
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:526a104a3342e36dad5c5e7f98c647da6b2a33897e458f772ff4afe523e0690a
           - name: kind
             value: task
         resolver: bundles
@@ -323,6 +327,8 @@ spec:
             - "vcs-ref=$(tasks.clone-repository.results.commit)"
             - "url=$(params.rhwa-url)"
             - "cpe=$(params.cpe)"
+        - name: BUILDAH_FORMAT
+          value: $(params.buildah-format)
       runAfter:
         - prefetch-dependencies
         - generate-labels
@@ -356,6 +362,8 @@ spec:
         - name: IMAGES
           value:
             - $(tasks.build-container.results.IMAGE_URL)@$(tasks.build-container.results.IMAGE_DIGEST)
+        - name: BUILDAH_FORMAT
+          value: $(params.buildah-format)
       runAfter:
         - build-container
       taskRef:
