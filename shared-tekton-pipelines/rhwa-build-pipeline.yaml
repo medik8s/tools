@@ -278,22 +278,6 @@ spec:
           workspace: git-auth
         - name: netrc
           workspace: netrc
-    - name: generate-labels
-      params:
-        - name: label-templates
-          value:
-            - "commit-date=$SOURCE_DATE"
-      runAfter:
-        - clone-repository
-      taskRef:
-        params:
-          - name: name
-            value: generate-labels
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-generate-labels:0.1@sha256:cca7603c8cf7786f8f91f6a16affd2316fb9e15665a17f241da3bb1ff891b4bf
-          - name: kind
-            value: task
-        resolver: bundles
     - name: build-container
       params:
         - name: IMAGE
@@ -319,9 +303,7 @@ spec:
           value: $(params.privileged-nested)
         - name: LABELS
           value:
-            - $(tasks.generate-labels.results.labels[*])
             - "upstream-version=release-0.$(params.upstream-minor-version)-$(params.upstream-short-commit)"
-            - "upstream-vcs-ref=$(params.upstream-commit)"
             - "release=$(params.artifact-version)-$(tasks.clone-repository.results.commit-timestamp)" # incorporating the artifact-version and timestamp
             - "version=$(params.semver-version)" # version label
             - "vcs-ref=$(tasks.clone-repository.results.commit)"
@@ -331,7 +313,6 @@ spec:
           value: $(params.buildah-format)
       runAfter:
         - prefetch-dependencies
-        - generate-labels
       taskRef:
         params:
           - name: name
