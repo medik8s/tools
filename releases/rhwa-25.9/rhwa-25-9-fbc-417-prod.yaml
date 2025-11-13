@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: rhwa-25-9-fbc-417-prod-ga
+  namespace: rhwa-tenant
+spec:
+  releasePlan: rhwa-fbc-417-releaseplan-prod
+  snapshot: rhwa-fbc-417-pbpjb
