@@ -8,7 +8,7 @@ spec:
   snapshot: snr-0-11-86whz
   data:
     releaseNotes:
-      type: RHEA
+      type: RHBA
       issues: 
         fixed:
           - id: RHWA-382
