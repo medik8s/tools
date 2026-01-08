@@ -1,0 +1,37 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "description": [
+        "Default preset for RHWA repos with Git Submodules and Containerfiles changes"
+    ],
+    "git-submodules": {
+        "description": [
+            "Schedule git-submodules changes on any time Mintmaker is available (every 4 hours) and auto-merge them"
+        ],
+        "schedule": [
+            "at any time"
+        ]
+    },
+    "dockerfile": {
+        "description": [
+            "Schedule Containerfile changes on any time Mintmaker is available (every 4 hours) and auto-merge them after updating the RPM lockfile"
+        ],
+        "schedule": [
+            "at any time"
+        ],
+        "managerFilePatterns": [
+            "/(^|/)Containerfile.*$/"
+        ]
+    },
+    "packageRules": [
+        {
+            "description": [
+                "Automerge everything"
+            ],
+            "matchManagers": [
+                "git-submodules",
+                "dockerfile"
+            ],
+            "automerge": true
+        }
+    ]
+}

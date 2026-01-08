@@ -1,0 +1,63 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "description": [
+        "RHWA preset for RHWA repos with RPMs and external packages dependencies"
+    ],
+    "git-submodules": {
+        "description": [
+            "Schedule git-submodules changes on any time Mintmaker is available (every 4 hours) and auto-merge them"
+        ],
+        "schedule": [
+            "at any time"
+        ]
+    },
+    "dockerfile": {
+        "description": [
+            "Schedule Containerfile changes on any time Mintmaker is available (every 4 hours) and auto-merge them after updating the RPM lockfile"
+        ],
+        "schedule": [
+            "at any time"
+        ],
+        "managerFilePatterns": [
+            "/(^|/)Containerfile.*$/"
+        ]
+    },
+    "rpm-lockfile": {
+        "description": [
+            "Schedule RPM lockfile changes on any time Mintmaker is available (every 4 hours) and auto-merge them"
+        ],
+        "schedule": [
+            "at any time"
+        ]
+    },
+    "packageRules": [
+        {
+            "description": [
+                "Automerge everything"
+            ],
+            "matchManagers": [
+                "git-submodules",
+                "dockerfile",
+                "rpm-lockfile"
+            ],
+            "automerge": true
+        },
+        {
+            "description": [
+                "Regenerate RPM lockfile when Dockerfile base image updates"
+            ],
+            "matchManagers": [
+                "dockerfile"
+            ],
+            "postUpgradeTasks": {
+                "commands": [
+                    "rpm-lockfile-prototype rpms.in.yaml"
+                ],
+                "fileFilters": [
+                    "rpms.lock.yaml"
+                ],
+                "executionMode": "branch"
+            }
+        }
+    ]
+}
