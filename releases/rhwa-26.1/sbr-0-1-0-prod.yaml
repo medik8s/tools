@@ -13,3 +13,5 @@ spec:
         fixed:
           - id: RHWA-405
             source: issues.redhat.com
+          - id: RHWA-358
+            source: issues.redhat.com
