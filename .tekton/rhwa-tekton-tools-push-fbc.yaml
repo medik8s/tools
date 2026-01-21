@@ -25,7 +25,7 @@ spec:
       - name: revision
         value: '{{revision}}' # Or a specific commit SHA or tag for versioning
       - name: pathInRepo
-        value: shared-tekton-pipelines/rhwa-build-pipeline.yaml # Path to the Pipeline YAML file within that repo
+        value: shared-tekton-pipelines/rhwa-build-pipeline-fbc.yaml # Path to the Pipeline YAML file within that repo
   params:
     - name: git-url # This is the source_url for the component being built
       value: '{{source_url}}'
