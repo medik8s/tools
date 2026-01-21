@@ -146,7 +146,7 @@ spec:
       oci or docker.
     name: buildah-format
     type: string
-  - default: "false"
+  - default: "true"
     description: Enable cache proxy configuration
     name: enable-cache-proxy
     type: string
