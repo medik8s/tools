@@ -116,7 +116,7 @@ spec:
     description: Add built image into an OCI image index
     name: build-image-index
     type: string
-  - default: "false"
+  - default: "true"
     description: Enable cache proxy configuration
     name: enable-cache-proxy
   - default: []
