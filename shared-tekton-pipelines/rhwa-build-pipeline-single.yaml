@@ -1,7 +1,7 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: rhwa-build-pipeline-new
+  name: rhwa-build-pipeline-single
   labels:
     pipelines.openshift.io/used-by: rhwa-tekton
 spec:
