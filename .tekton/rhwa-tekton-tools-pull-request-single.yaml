@@ -1,0 +1,55 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://gitlab.cee.redhat.com/dragonfly/tools/-/tree/{{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
+      == "main" && ( "shared-tekton-pipelines/rhwa-build-pipeline-single.yaml".pathChanged() || ".tekton/rhwa-tekton-tools-pull-request-single.yaml".pathChanged() )
+  creationTimestamp: null
+  labels:
+    appstudio.openshift.io/application: rhwa-tools
+    appstudio.openshift.io/component: rhwa-tekton-tools
+    pipelines.appstudio.openshift.io/type: build
+  name: rhwa-tekton-tools-on-pull-request-single
+  namespace: rhwa-tenant
+spec:
+  pipelineRef:
+    resolver: git
+    params:
+      - name: url
+        value: '{{source_url}}' # URL to the repo hosting the pipeline
+      - name: revision
+        value: '{{revision}}' # Or a specific commit SHA or tag for versioning
+      - name: pathInRepo
+        value: shared-tekton-pipelines/rhwa-build-pipeline-single.yaml # Path to the Pipeline YAML file within that repo
+  params:
+    - name: git-url # This is the source_url for the component being built
+      value: '{{source_url}}'
+    - name: revision # This is the revision for the component being built
+      value: '{{revision}}'
+    - name: output-image
+      value: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-tools/rhwa-tekton-tools:single-on-pr-{{revision}}
+    - name: dockerfile
+      value: containers/Containerfile.dummy
+    - name: is_pull_request
+      value: "true"
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-rhwa-tekton-tools
+  workspaces:
+    - name: git-auth
+      secret:
+        secretName: '{{ git_auth_secret }}'
+    - name: workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi # increase accordingly
+status: {}
