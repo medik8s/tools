@@ -114,10 +114,6 @@ spec:
       name: dockerfile
       type: string
     - default: "false"
-      description: Force rebuild image
-      name: rebuild
-      type: string
-    - default: "false"
       description: Skip checks against built image
       name: skip-checks
       type: string
@@ -216,12 +212,6 @@ spec:
   tasks:
     - name: init
       params:
-        - name: image-url
-          value: $(params.output-image)
-        - name: rebuild
-          value: $(params.rebuild)
-        - name: skip-checks
-          value: $(params.skip-checks)
         - name: enable-cache-proxy
           value: $(params.enable-cache-proxy)
       taskRef:
@@ -229,7 +219,7 @@ spec:
           - name: name
             value: init
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:ebf06778aeacbbeb081f9231eafbdfdb8e380ad04e211d7ed80ae9101e37fd82
+            value: quay.io/konflux-ci/tekton-catalog/task-init:0.3@sha256:aa6f8632cc23d605c5942505ff1d00280db16a6fda5c4c56c4ed9ae936b5fbc6
           - name: kind
             value: task
         resolver: bundles
@@ -250,11 +240,6 @@ spec:
           - name: kind
             value: task
         resolver: bundles
-      when:
-        - input: $(tasks.init.results.build)
-          operator: in
-          values:
-            - "true"
       workspaces:
         - name: output
           workspace: workspace
@@ -328,11 +313,6 @@ spec:
           - name: kind
             value: task
         resolver: bundles
-      when:
-        - input: $(tasks.init.results.build)
-          operator: in
-          values:
-            - "true"
       workspaces:
         - name: source
           workspace: workspace
@@ -362,11 +342,6 @@ spec:
           - name: kind
             value: task
         resolver: bundles
-      when:
-        - input: $(tasks.init.results.build)
-          operator: in
-          values:
-            - "true"
     - name: build-source-image
       params:
         - name: BINARY_IMAGE
@@ -385,10 +360,6 @@ spec:
             value: task
         resolver: bundles
       when:
-        - input: $(tasks.init.results.build)
-          operator: in
-          values:
-            - "true"
         - input: $(params.build-source-image)
           operator: in
           values:
