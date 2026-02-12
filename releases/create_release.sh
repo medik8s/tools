@@ -226,7 +226,7 @@ fbc_snapshot=$(yq '.fbc_snapshot' fbc_to_release.yaml)
 fbc_release_plan=$(yq '.fbc_release_plan' fbc_to_release.yaml | sed 's/-stage/-prod/')
 
 timestamp=$(date +%Y%m%d-%H%M)
-fbc_manifest_name="${release_name}-fbc-prod-${timestamp}"
+fbc_manifest_name="${release_name}-${fbc_name}-prod-${timestamp}"
 cat > "${release_name}/${fbc_manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
