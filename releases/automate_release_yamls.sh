@@ -1,5 +1,8 @@
 #!/bin/bash
 
+echo "DEPRECATED! Use create_release.sh instead"
+exit 0
+
 # This script generates a Kubernetes Release custom resource YAML file for FBC operators.
 # It accepts command-line arguments to specify the necessary parameters.
 

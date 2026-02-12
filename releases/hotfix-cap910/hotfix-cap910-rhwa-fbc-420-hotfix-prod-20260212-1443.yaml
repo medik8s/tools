@@ -1,7 +1,7 @@
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
-  name: rhwa-hotfix-fbc-420-prod-ga
+  name: hotfix-cap910-rhwa-fbc-420-hotfix-prod-20260212-1443
   namespace: rhwa-tenant
 spec:
   releasePlan: rhwa-fbc-420-releaseplan-prod-hotfix
