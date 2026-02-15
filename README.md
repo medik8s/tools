@@ -8,9 +8,11 @@ The repo layout is:
 - `containers` directory for dummy containerfiles (of regular and fbc images) that are used in the container build of the Tekton PipelineRuns under `.tekton` directory
 - `releases` directory for Konflux release CRs for each RHWA release
   - Includes a directory for each RHWA release with Konflux since we have migrated to Konflux (2025).
-  - Includes a `automate_release_yamls.sh` script for creating an FBC or non-FBC release YAML. - Run `./releases/automate_release_yamls.sh usage` for help and view the below examples:
-    - `./releases/automate_release_yamls.sh non-fbc 26.1 sbr-0-1 0 hkncb prod`
-    - `./releases/automate_release_yamls.sh fbc 26.1 4.20 6l6qg prod tp`
+  - Includes a script for creating  FBC or non-FBC release YAML.
+    - Option A - Run `./releases/create_release.sh DIR_NAME FBC_APP STAGED_IIB`. Find related snapshots from staged IIB and create release YAMLs (FBC and non-fbc) under `DIR_NAME`.
+    - Option B - Run `./releases/automate_release_yamls.sh usage` for help and view the below examples:
+      - `./releases/automate_release_yamls.sh non-fbc 26.1 sbr-0-1 0 hkncb prod`
+      - `./releases/automate_release_yamls.sh fbc 26.1 4.20 6l6qg prod tp`
 - `shared-tekton-pipelines` directory for the shared Tekton Pipelines which are used in many Dragonfly operators under RHWA product
 - `renovate-config` directory renovate config preset files (see [Inherited Config](https://konflux.pages.redhat.com/docs/users/mintmaker/user.html#inherited-config) and [RHWA-552](https://issues.redhat.com/browse/RHWA-552))
   - Includes a default preset for RHWA repos with Git Submodules and Containerfiles changes.

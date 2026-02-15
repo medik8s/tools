@@ -22,6 +22,8 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 expected_cluster_name="stone-prod-p02"
 rhwa_namespace="rhwa-tenant"
 
@@ -60,7 +62,7 @@ while IFS= read -r release; do
         fbc_snapshot=$(echo "${release_manifest}" | yq '.spec.snapshot')
         fbc_release_plan=$(echo "${release_manifest}" | yq '.spec.releasePlan')
 
-        cat > fbc_to_release.yaml <<EOF
+        cat > "${SCRIPT_DIR}/fbc_to_release.yaml" <<EOF
 fbc_release: ${fbc_release}
 fbc_snapshot: ${fbc_snapshot}
 fbc_release_plan: ${fbc_release_plan}
@@ -84,13 +86,13 @@ echo "Found matching release ${fbc_release} with snaphot ${fbc_snapshot}"
 fbc_image=$(oc -n ${rhwa_namespace} get snapshots ${fbc_snapshot} -o yaml | yq '.spec.components.[]'.containerImage)
 
 # Extract /configs from the FBC image
-tmp_dir=$(mktemp -d -p .)
+tmp_dir=$(mktemp -d -p "${SCRIPT_DIR}")
 container_id=$(podman create "${fbc_image}")
 podman cp "${container_id}:/configs" "${tmp_dir}/configs"
 podman rm "${container_id}"
 
 # Iterate extracted directories and ask which bundles to release
-bundles_file="bundles_to_release.yaml"
+bundles_file="${SCRIPT_DIR}/bundles_to_release.yaml"
 echo "bundles:" > "${bundles_file}"
 
 for dir in "${tmp_dir}/configs"/*/; do
@@ -104,7 +106,7 @@ for dir in "${tmp_dir}/configs"/*/; do
 
     while IFS= read -r -u 3 bundle_name; do
         [[ -z "$bundle_name" || "$bundle_name" == "---" ]] && continue
-        read -p "Release ${bundle_name}? [y/N] " answer
+        read -p "Create release YAML for ${bundle_name}? [y/N] " answer
         if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
             bundle_image=$(yq "select(.schema == \"olm.bundle\" and .name == \"${bundle_name}\") | .image" "${catalog_file}")
             operator="${bundle_name%%.*}"
@@ -141,13 +143,13 @@ for (( i=0; i<bundle_count; i++ )); do
 				node-healthcheck-operator)
 						operator_short="nhc"
 						;;
-				fence-agents-remediation-operator)
+				fence-agents-remediation)
 						operator_short="far"
 						;;
-				self-node-remediation-operator)
+				self-node-remediation)
 						operator_short="snr"
 						;;
-				machine-deletion-remediation-operator)
+				machine-deletion-remediation)
 						operator_short="mdr"
 						;;
 				node-maintenance-operator)
@@ -188,7 +190,7 @@ for (( i=0; i<bundle_count; i++ )); do
 done
 
 # Create release manifests
-mkdir -p "${release_name}"
+mkdir -p "${SCRIPT_DIR}/${release_name}"
 
 # Operator releases
 bundle_count=$(yq '.bundles | length' "${bundles_file}")
@@ -201,7 +203,7 @@ for (( i=0; i<bundle_count; i++ )); do
     op_release_plan=$(yq ".bundles[${i}].op_release_plan" "${bundles_file}" | sed 's/-stage/-prod/')
 
     manifest_name="${operator_short}-${major}-${minor}-${patch}-prod"
-    cat > "${release_name}/${manifest_name}.yaml" <<EOF
+    cat > "${SCRIPT_DIR}/${release_name}/${manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
@@ -218,16 +220,16 @@ spec:
           - id: REPLACE_ME
             source: issues.redhat.com
 EOF
-    echo "Created ${release_name}/${manifest_name}.yaml"
+    echo "Created ${SCRIPT_DIR}/${release_name}/${manifest_name}.yaml"
 done
 
 # FBC catalog release
-fbc_snapshot=$(yq '.fbc_snapshot' fbc_to_release.yaml)
-fbc_release_plan=$(yq '.fbc_release_plan' fbc_to_release.yaml | sed 's/-stage/-prod/')
+fbc_snapshot=$(yq '.fbc_snapshot' "${SCRIPT_DIR}/fbc_to_release.yaml")
+fbc_release_plan=$(yq '.fbc_release_plan' "${SCRIPT_DIR}/fbc_to_release.yaml" | sed 's/-stage/-prod/')
 
 timestamp=$(date +%Y%m%d-%H%M)
 fbc_manifest_name="${release_name}-${fbc_name}-prod-${timestamp}"
-cat > "${release_name}/${fbc_manifest_name}.yaml" <<EOF
+cat > "${SCRIPT_DIR}/${release_name}/${fbc_manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
@@ -238,5 +240,5 @@ spec:
   snapshot: ${fbc_snapshot}
 EOF
 
-echo "Created ${release_name}/${fbc_manifest_name}.yaml"
+echo "Created ${SCRIPT_DIR}/${release_name}/${fbc_manifest_name}.yaml"
 echo "add Jira issues as needed!"
