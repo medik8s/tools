@@ -1,0 +1,11 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: mdr-0-6-0-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: mdr-0-6-releaseplan-prod
+  snapshot: mdr-0-6-rrvx5
+  data:
+    releaseNotes:
+      type: RHEA
