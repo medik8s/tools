@@ -1,0 +1,11 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: nmo-5-6-0-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: nmo-5-6-releaseplan-prod
+  snapshot: nmo-5-6-hmf9h
+  data:
+    releaseNotes:
+      type: RHEA
