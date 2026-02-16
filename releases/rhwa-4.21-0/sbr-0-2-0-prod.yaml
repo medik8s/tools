@@ -5,7 +5,7 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: sbr-0-2-releaseplan-prod
-  snapshot: sbr-0-2-20260201-110131-000
+  snapshot: sbr-0-2-20260203-214550-000
   data:
     releaseNotes:
       type: RHEA
