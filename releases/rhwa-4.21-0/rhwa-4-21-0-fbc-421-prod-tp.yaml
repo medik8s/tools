@@ -4,5 +4,5 @@ metadata:
   name: rhwa-4-21-0-fbc-421-prod-tp
   namespace: rhwa-tenant
 spec:
-  releasePlan: rhwa-fbc-421-releaseplan-prod-tp
+  releasePlan: rhwa-fbc-421-tp-releaseplan-prod
   snapshot: rhwa-fbc-421-tp-20260208-141317-000
