@@ -5,4 +5,4 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: rhwa-fbc-421-releaseplan-prod
-  snapshot: rhwa-fbc-421-20260211-160636-000
+  snapshot: rhwa-fbc-421-20260217-132643-000
