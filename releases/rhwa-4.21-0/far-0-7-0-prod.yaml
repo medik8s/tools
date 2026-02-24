@@ -5,7 +5,7 @@ metadata:
   namespace: rhwa-tenant
 spec:
   releasePlan: far-0-7-releaseplan-prod
-  snapshot: far-0-7-n65w2
+  snapshot: far-0-7-20260223-123454-000
   data:
     releaseNotes:
       type: RHEA
