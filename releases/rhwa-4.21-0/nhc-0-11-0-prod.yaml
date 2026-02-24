@@ -11,9 +11,11 @@ spec:
       type: RHBA
       issues:
         fixed:
-          - id: RHWA-16
-            source: issues.redhat.com
           - id: RHWA-387
+            source: issues.redhat.com
+          - id: RHWA-745
+            source: issues.redhat.com
+          - id: RHWA-16
             source: issues.redhat.com
           - id: RHWA-310
             source: issues.redhat.com
@@ -21,5 +23,4 @@ spec:
             source: issues.redhat.com
           - id: RHWA-365
             source: issues.redhat.com
-          - id: RHWA-745
-            source: issues.redhat.com
+
