@@ -6,11 +6,11 @@
 # tags on the downstream GitLab repos.
 #
 # Usage:
-#   ./tag_downstream.sh [--dry-run] [--commits-only] <fbc-app-name>
+#   ./tag_downstream.sh [--commits-only] <fbc-app-name>
 #
 # Example:
 #   ./tag_downstream.sh rhwa-fbc-421
-#   ./tag_downstream.sh --dry-run rhwa-fbc-421
+#   ./tag_downstream.sh --commits-only rhwa-fbc-421
 #
 # Prerequisites:
 #   - Logged into cluster stone-prod-p02 (oc CLI)
@@ -24,8 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 expected_cluster_name="stone-prod-p02"
 rhwa_namespace="rhwa-tenant"
 gitlab_base="git@gitlab.cee.redhat.com:dragonfly"
+gitlab_web="https://gitlab.cee.redhat.com/dragonfly"
 
-DRY_RUN=false
 COMMITS_ONLY=false
 FBC_APP=""
 
@@ -96,7 +96,7 @@ find_fbc_prod_release() {
         manifest=$(oc -n "${rhwa_namespace}" get releases "${release}" -o yaml)
         local release_plan
         release_plan=$(echo "${manifest}" | yq '.spec.releasePlan')
-        if [[ "$release_plan" == *-prod ]]; then
+        if [[ "$release_plan" == *-prod* ]]; then
             local timestamp
             timestamp=$(echo "${manifest}" | yq '.metadata.creationTimestamp')
             if [[ -z "$latest_ts" || "$timestamp" > "$latest_ts" ]]; then
@@ -108,7 +108,7 @@ find_fbc_prod_release() {
     done <<< "$releases"
 
     [[ -n "$latest_release" ]] || \
-        die "No prod releases found for ${FBC_APP} (no releasePlan ending with '-prod')"
+        die "No prod releases found for ${FBC_APP} (no releasePlan containing '-prod')"
 
     info "Release:  ${latest_release}"
     info "Snapshot: ${FBC_SNAPSHOT}"
@@ -135,14 +135,6 @@ extract_bundles_from_fbc() {
     info "FBC image: ${fbc_image}"
 
     TMP_DIR=$(mktemp -d -p "${SCRIPT_DIR}")
-
-    if [[ "$DRY_RUN" == true ]]; then
-        echo "[dry-run] podman create --name fbc-extract ${fbc_image}"
-        echo "[dry-run] podman cp fbc-extract:/configs ${TMP_DIR}/configs"
-        echo "[dry-run] podman rm fbc-extract"
-        warn "Dry-run: cannot extract bundles without pulling image — stopping here"
-        return 1
-    fi
 
     podman create --name fbc-extract "${fbc_image}" >/dev/null
     podman cp "fbc-extract:/configs" "${TMP_DIR}/configs"
@@ -301,11 +293,6 @@ tag_downstream_repo() {
         fi
 
         warn "Tag ${tag} on ${repo} points to ${existing_commit:0:12}, expected ${commit:0:12}" >&2
-        if [[ "$DRY_RUN" == true ]]; then
-            echo "[dry-run] Would overwrite tag ${tag} on ${repo}" >&2
-            echo "overwritten"
-            return
-        fi
         read -rp "    Overwrite tag ${tag} on ${repo}? [y/N] " answer </dev/tty
         if [[ "$answer" != [yY] ]]; then
             info "Skipping ${tag} on ${repo} (user declined)" >&2
@@ -313,15 +300,6 @@ tag_downstream_repo() {
             return
         fi
         info "Overwriting tag ${tag} on ${repo}" >&2
-    fi
-
-    if [[ "$DRY_RUN" == true ]]; then
-        echo "[dry-run] git clone --depth 1 ${remote} /tmp/${repo}-tag-$$" >&2
-        echo "[dry-run] git fetch --depth 1 origin ${commit}" >&2
-        echo "[dry-run] git tag -s ${tag} ${commit} -m '${display} ${tag}'" >&2
-        echo "[dry-run] git push origin ${tag}" >&2
-        echo "created"
-        return
     fi
 
     local tmp_clone="/tmp/${repo}-tag-$$"
@@ -354,7 +332,6 @@ tag_downstream_repo() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --dry-run) DRY_RUN=true; shift ;;
             --commits-only) COMMITS_ONLY=true; shift ;;
             -h|--help)
                 sed -n '2,/^$/{ s/^# \?//; p }' "${BASH_SOURCE[0]}"
@@ -371,8 +348,18 @@ parse_args() {
     [[ -n "$FBC_APP" ]] || die "No FBC app name specified. Run with --help for usage."
 }
 
+commit_url() {
+    local repo="$1" commit="$2"
+    echo "${gitlab_web}/${repo}/-/commit/${commit}"
+}
+
 summary_line() {
-    printf '%-8s %-35s %-12s %-10s %s' "$@"
+    local op="$1" repo="$2" version="$3" commit="$4" status="$5" url="${6:-}"
+    if [[ -n "$url" ]]; then
+        printf '%-8s %-35s %-12s %-14s %-10s %s' "$op" "$repo" "$version" "$commit" "$status" "$url"
+    else
+        printf '%-8s %-35s %-12s %-14s %s' "$op" "$repo" "$version" "$commit" "$status"
+    fi
 }
 
 main() {
@@ -382,18 +369,10 @@ main() {
         REPO_TO_SHORT[${OP_REPO[$short]}]="$short"
     done
 
-    if [[ "$DRY_RUN" == true ]]; then
-        log "DRY RUN MODE — no changes will be made"
-        echo ""
-    fi
-
     validate_prerequisites
     find_fbc_prod_release
 
-    if ! extract_bundles_from_fbc; then
-        [[ "$DRY_RUN" == true ]] && exit 0
-        die "Failed to extract bundles from FBC"
-    fi
+    extract_bundles_from_fbc
 
     local -a summary=()
     local -a tagged=() skipped=() failed=()
@@ -418,26 +397,30 @@ main() {
 
         local commit
         if ! commit=$(resolve_bundle_to_commit "$op_short" "$bundle_image" "$major" "$minor"); then
-            summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "FAILED (could not resolve commit)")")
+            summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "FAILED")")
             failed+=("$op_short")
             continue
         fi
+
+        local short_commit="${commit:0:12}"
+        local url
+        url=$(commit_url "$repo" "$commit")
 
         if [[ "$COMMITS_ONLY" == true ]]; then
             local tag_status
             tag_status=$(verify_existing_tag "$repo" "$version" "$commit")
             case "$tag_status" in
                 "OK (tag matches)")
-                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "OK")")
+                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "OK" "$url")")
                     skipped+=("$op_short")
                     ;;
                 "NEEDS TAG")
-                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "NEEDS TAG")")
+                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "NEEDS TAG" "$url")")
                     tagged+=("$op_short")
                     ;;
                 MISMATCH*)
                     local existing_commit="${tag_status#MISMATCH }"
-                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "MISMATCH (tag→${existing_commit:0:12})")")
+                    summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "MISMATCH" "$url")")
                     failed+=("$op_short")
                     ;;
             esac
@@ -449,20 +432,20 @@ main() {
         local result
         result=$(tag_downstream_repo "$repo" "$version" "$commit" "$display")
         case "$result" in
-            created|overwritten)
-                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "${result^^}")")
+            created)
+                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "CREATED" "$url")")
                 tagged+=("$op_short")
                 ;;
             exists)
-                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "OK")")
+                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "OK" "$url")")
                 skipped+=("$op_short")
                 ;;
             skipped)
-                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "SKIPPED (user declined)")")
+                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "SKIPPED")")
                 skipped+=("$op_short")
                 ;;
             *)
-                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$commit" "FAILED")")
+                summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "FAILED" "$url")")
                 failed+=("$op_short")
                 ;;
         esac
@@ -471,8 +454,8 @@ main() {
     echo ""
     log "Summary"
     echo ""
-    printf "    %-8s %-35s %-12s %-10s %s\n" "OP" "REPO" "VERSION" "COMMIT" "STATUS"
-    printf "    %-8s %-35s %-12s %-10s %s\n" "──" "────" "───────" "──────" "──────"
+    printf "    %-8s %-35s %-12s %-14s %-10s %s\n" "OP" "REPO" "VERSION" "COMMIT" "STATUS" "URL"
+    printf "    %-8s %-35s %-12s %-14s %-10s %s\n" "──" "────" "───────" "──────" "──────" "───"
     for entry in "${summary[@]}"; do
         printf "    %s\n" "$entry"
     done
