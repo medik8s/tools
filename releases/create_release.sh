@@ -203,6 +203,7 @@ for (( i=0; i<bundle_count; i++ )); do
     op_release_plan=$(yq ".bundles[${i}].op_release_plan" "${bundles_file}" | sed 's/-stage/-prod/')
 
     manifest_name="${operator_short}-${major}-${minor}-${patch}-prod"
+    manifest_name="${manifest_name,,}"
     cat > "${SCRIPT_DIR}/${release_name}/${manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
@@ -229,6 +230,7 @@ fbc_release_plan=$(yq '.fbc_release_plan' "${SCRIPT_DIR}/fbc_to_release.yaml" | 
 
 timestamp=$(date +%Y%m%d-%H%M)
 fbc_manifest_name="${release_name}-${fbc_name}-prod-${timestamp}"
+fbc_manifest_name="${fbc_manifest_name,,}"
 cat > "${SCRIPT_DIR}/${release_name}/${fbc_manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
