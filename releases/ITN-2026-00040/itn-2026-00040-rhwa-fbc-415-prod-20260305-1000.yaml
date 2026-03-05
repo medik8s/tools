@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: itn-2026-00040-rhwa-fbc-415-prod-20260305-1000
+  namespace: rhwa-tenant
+spec:
+  releasePlan: rhwa-fbc-415-releaseplan-prod
+  snapshot: rhwa-fbc-415-20260220-145603-000
