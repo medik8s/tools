@@ -35,10 +35,11 @@ Options:
 
 Prerequisites:
   1. oc login to target cluster
-  2. Brew pull secret YAML at iib_deployment/secrets/brew-pull-secret.yaml
+  2. Pull secret YAML at iib_deployment/secrets/brew-pull-secret.yaml
      Get from: https://access.redhat.com/terms-based-registry/
-     Create a service account, download the OpenShift secret YAML,
-     then modify the registry URL from registry.redhat.io to brew.registry.redhat.io
+     Create a service account and download the OpenShift secret YAML.
+     If the secret targets registry.redhat.io, use --convert-secret to
+     automatically convert it to brew.registry.redhat.io
   3. GITLAB_PRIVATE_TOKEN env var (for fetching IDMS from private rhwa-fbc repo, skip with --no-idms)
 
 Note: This script uses the OLM v0 CatalogSource API:
