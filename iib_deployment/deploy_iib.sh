@@ -74,26 +74,30 @@ check_prerequisites() {
     fi
 
     if [[ "${CLEANUP}" == "false" && ! -f "${SECRET_PATH}" ]]; then
-        echo "Error: Pull secret not found at ${SECRET_PATH}"
-        echo ""
-        echo "To create one:"
-        echo "  1. Go to https://access.redhat.com/terms-based-registry/"
-        echo "  2. Create a service account or use an existing one"
-        echo "  3. Download the OpenShift secret YAML"
-        echo "  4. Change the registry URL from registry.redhat.io to brew.registry.redhat.io"
-        echo "  5. Save to ${SECRET_DEFAULT_PATH}"
-        echo ""
-        echo "Or pass --secret /path/to/secret.yaml"
+        cat <<ERRMSG
+Error: Pull secret not found at ${SECRET_PATH}
+
+To create one:
+  1. Go to https://access.redhat.com/terms-based-registry/
+  2. Create a service account or use an existing one
+  3. Download the OpenShift secret YAML
+  4. Use --convert-secret to convert it to brew.registry.redhat.io
+  5. Save to ${SECRET_DEFAULT_PATH}
+
+Or pass --secret /path/to/secret.yaml
+ERRMSG
         exit 1
     fi
 
     if [[ "${APPLY_IDMS}" == "true" && -z "${GITLAB_PRIVATE_TOKEN:-}" ]]; then
-        echo "Error: GITLAB_PRIVATE_TOKEN env var is required to fetch IDMS from GitLab"
-        echo "Export it before running:"
-        echo "  export GITLAB_PRIVATE_TOKEN=<your-gitlab-cee-personal-access-token>"
-        echo "  # Get from: https://gitlab.cee.redhat.com/-/user_settings/personal_access_tokens"
-        echo ""
-        echo "Or skip IDMS with --no-idms"
+        cat <<ERRMSG
+Error: GITLAB_PRIVATE_TOKEN env var is required to fetch IDMS from GitLab
+Export it before running:
+  export GITLAB_PRIVATE_TOKEN=<your-gitlab-cee-personal-access-token>
+  # Get from: https://gitlab.cee.redhat.com/-/user_settings/personal_access_tokens
+
+Or skip IDMS with --no-idms
+ERRMSG
         exit 1
     fi
 }
@@ -121,9 +125,11 @@ cleanup() {
         fi
     fi
 
-    echo "Cleanup complete"
-    echo "Note: IDMS (imagedigestmirrorset) is not removed — delete manually if needed:"
-    echo "  oc delete imagedigestmirrorset rhwa-fbc-fips-image-mirror-set"
+    cat <<MSG
+Cleanup complete
+Note: IDMS (imagedigestmirrorset) is not removed — delete manually if needed:
+  oc delete imagedigestmirrorset rhwa-fbc-fips-image-mirror-set
+MSG
 }
 
 convert_secret_to_brew() {
@@ -284,17 +290,19 @@ main() {
         apply_idms
     fi
 
-    echo ""
-    echo "=== IIB ${IIB_NR} deployed successfully ==="
-    echo ""
-    echo "Verify with:"
-    echo "  oc get catalogsource ${CATSRC_NAME} -n ${NAMESPACE}"
-    echo "  oc get pods -l olm.catalogSource=${CATSRC_NAME} -n ${NAMESPACE}"
-    echo "  oc get packagemanifests -n ${NAMESPACE} | grep -E 'self-node-remediation|fence-agents-remediation|node-healthcheck-operator|node-maintenance-operator|machine-deletion-remediation|storage-based-remediation'"
+    local idms_note=""
     if [[ "${APPLY_IDMS}" == "false" ]]; then
-        echo ""
-        echo "IDMS was skipped. If operator images fail to pull, re-run without --no-idms"
+        idms_note=$'\nIDMS was skipped. If operator images fail to pull, re-run without --no-idms'
     fi
+
+    cat <<MSG
+
+=== IIB ${IIB_NR} deployed successfully ===
+
+Verify with:
+  oc get catalogsource ${CATSRC_NAME} -n ${NAMESPACE}
+  oc get packagemanifests -n ${NAMESPACE} | grep -E 'self-node-remediation|fence-agents-remediation|node-healthcheck-operator|node-maintenance-operator|machine-deletion-remediation|storage-based-remediation'${idms_note}
+MSG
 }
 
 # --- Argument parsing ---
