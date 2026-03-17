@@ -187,6 +187,11 @@ for (( i=0; i<bundle_count; i++ )); do
 				fi
 		done <<< "$op_releases"
 
+		if [[ -z "$op_release" ]]; then
+				echo "Error: no release found for bundle ${bundle_name} with shasum matching image ${image}"
+				exit 1
+		fi
+
 done
 
 # Create release manifests
