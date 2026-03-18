@@ -1,0 +1,15 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: snr-0-12-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: snr-0-12-releaseplan-prod
+  snapshot: snr-0-12-20260211-223826-000
+  data:
+    releaseNotes:
+      type: RHBA
+      issues:
+        fixed:
+          - id: RHWA-447
+            source: issues.redhat.com

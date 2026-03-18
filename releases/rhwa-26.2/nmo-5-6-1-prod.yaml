@@ -1,0 +1,15 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: nmo-5-6-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: nmo-5-6-releaseplan-prod
+  snapshot: nmo-5-6-20260302-144922-000
+  data:
+    releaseNotes:
+      type: RHBA
+      issues:
+        fixed:
+          - id: RHWA-744
+            source: issues.redhat.com
