@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # tag_downstream.sh — Tag downstream GitLab repos from Konflux prod releases.
 #
-# Finds the latest FBC prod release in Konflux, extracts the operator bundles,
-# resolves the source commits via skopeo inspect, and creates signed version
-# tags on the downstream GitLab repos.
+# Finds the latest FBC prod release in Konflux, extracts all operator bundles,
+# resolves the source commits from snapshots, and creates signed version tags
+# on the downstream GitLab repos.
 #
 # Usage:
 #   ./tag_downstream.sh [--commits-only] <fbc-app-name>
@@ -15,7 +15,15 @@
 # Prerequisites:
 #   - Logged into cluster stone-prod-p02 (oc CLI)
 #   - podman login quay.io/redhat-user-workloads
-#   - Tools: oc, podman, skopeo, yq, jq, git
+#   - Tools: oc, podman, yq, git
+#
+# Status legend:
+#   OK         - tag verified against Konflux released snapshot
+#   TAGGED     - tag exists on GitLab (Konflux release GC'd, cannot verify)
+#   CREATED    - tag created and pushed to GitLab
+#   NEEDS TAG  - commit resolved but tag missing (--commits-only mode)
+#   UNRESOLVED - no tag on GitLab and no Konflux release to resolve commit
+#   MISMATCH   - tag exists but points to a different commit
 
 set -euo pipefail
 
@@ -60,7 +68,7 @@ declare -a BUNDLE_IMAGES=()
 validate_prerequisites() {
     log "Validating prerequisites"
 
-    for cmd in oc podman skopeo yq jq git; do
+    for cmd in oc podman yq git; do
         command -v "$cmd" &>/dev/null || die "'$cmd' is required but not found in PATH"
     done
     info "Required tools: OK"
@@ -115,17 +123,6 @@ find_fbc_prod_release() {
     info "Created:  ${latest_ts}"
 }
 
-version_gt() {
-    local -a a b
-    IFS=. read -ra a <<< "$1"
-    IFS=. read -ra b <<< "$2"
-    for i in 0 1 2; do
-        (( ${a[$i]:-0} > ${b[$i]:-0} )) && return 0
-        (( ${a[$i]:-0} < ${b[$i]:-0} )) && return 1
-    done
-    return 1
-}
-
 extract_bundles_from_fbc() {
     log "Extracting bundles from FBC snapshot"
 
@@ -140,10 +137,6 @@ extract_bundles_from_fbc() {
     podman cp "fbc-extract:/configs" "${TMP_DIR}/configs"
     podman rm fbc-extract >/dev/null
 
-    declare -A latest_version=()
-    declare -A latest_bundle_name=()
-    declare -A latest_bundle_image=()
-
     for dir in "${TMP_DIR}/configs"/*/; do
         local catalog_file="${dir}catalog.yaml"
         [[ -f "$catalog_file" ]] || continue
@@ -154,21 +147,13 @@ extract_bundles_from_fbc() {
         while IFS= read -r bundle_name; do
             [[ -z "$bundle_name" || "$bundle_name" == "---" ]] && continue
 
-            local operator="${bundle_name%%.*}"
-            local version="${bundle_name#*.v}"
+            local bundle_image
+            bundle_image=$(yq "select(.schema == \"olm.bundle\" and .name == \"${bundle_name}\") | .image" "${catalog_file}")
 
-            if [[ -z "${latest_version[$operator]:-}" ]] || version_gt "$version" "${latest_version[$operator]}"; then
-                latest_version[$operator]="$version"
-                latest_bundle_name[$operator]="$bundle_name"
-                latest_bundle_image[$operator]=$(yq "select(.schema == \"olm.bundle\" and .name == \"${bundle_name}\") | .image" "${catalog_file}")
-            fi
+            BUNDLE_NAMES+=("$bundle_name")
+            BUNDLE_IMAGES+=("$bundle_image")
+            info "Bundle: ${bundle_name}"
         done <<< "$bundle_names"
-    done
-
-    for operator in "${!latest_bundle_name[@]}"; do
-        BUNDLE_NAMES+=("${latest_bundle_name[$operator]}")
-        BUNDLE_IMAGES+=("${latest_bundle_image[$operator]}")
-        info "Bundle: ${latest_bundle_name[$operator]}"
     done
 
     [[ ${#BUNDLE_NAMES[@]} -gt 0 ]] || die "No bundles found in FBC image"
@@ -219,20 +204,12 @@ resolve_bundle_to_commit() {
         op_snapshot=$(echo "${manifest}" | yq '.spec.snapshot')
 
         local bundle_component="${op_short}-bundle-${major}-${minor}"
-        local snapshot_bundle_image
-        snapshot_bundle_image=$(oc -n "${rhwa_namespace}" get snapshots "${op_snapshot}" -o yaml \
-            | yq ".spec.components[] | select(.name == \"${bundle_component}\") | .containerImage")
-
-        if [[ -z "$snapshot_bundle_image" ]]; then
-            warn "Could not find bundle image in snapshot ${op_snapshot}"
-            return 1
-        fi
-
-        info "Bundle image: ${snapshot_bundle_image}" >&2
         local commit
-        commit=$(skopeo inspect "docker://${snapshot_bundle_image}" | jq -r '.Labels["vcs-ref"]')
+        commit=$(oc -n "${rhwa_namespace}" get snapshots "${op_snapshot}" -o yaml \
+            | yq ".spec.components[] | select(.name == \"${bundle_component}\") | .source.git.revision")
+
         if [[ -z "$commit" || "$commit" == "null" ]]; then
-            warn "No vcs-ref label found on image ${snapshot_bundle_image}"
+            warn "No source revision found for ${bundle_component} in snapshot ${op_snapshot}"
             return 1
         fi
         info "Source commit: ${commit}" >&2
@@ -362,6 +339,22 @@ summary_line() {
     fi
 }
 
+group_by_operator() {
+    local -A groups=()
+    local -a order=()
+    for entry in "$@"; do
+        local op="${entry%%:*}"
+        local ver="${entry#*:}"
+        if [[ -z "${groups[$op]+x}" ]]; then
+            order+=("$op")
+        fi
+        groups[$op]+="${groups[$op]:+, }${ver}"
+    done
+    for op in "${order[@]}"; do
+        printf "\n      %-6s %s" "$op" "${groups[$op]}"
+    done
+}
+
 main() {
     parse_args "$@"
 
@@ -397,8 +390,23 @@ main() {
 
         local commit
         if ! commit=$(resolve_bundle_to_commit "$op_short" "$bundle_image" "$major" "$minor"); then
-            summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "FAILED")")
-            failed+=("$op_short")
+            local tag="v${version}"
+            local remote="${gitlab_base}/${repo}.git"
+            info "Konflux release not available, checking GitLab for tag ${tag} on ${repo}"
+            local existing_commit
+            existing_commit=$(resolve_tag_commit "$remote" "$tag")
+            if [[ -n "$existing_commit" ]]; then
+                local short_existing="${existing_commit:0:12}"
+                local existing_url
+                existing_url=$(commit_url "$repo" "$existing_commit")
+                info "Tag ${tag} found on ${repo} (${short_existing})"
+                summary+=("$(summary_line "$op_short" "$repo" "$tag" "$short_existing" "TAGGED" "$existing_url")")
+                skipped+=("${op_short}:${tag}")
+            else
+                warn "Tag ${tag} not found on ${repo} and Konflux release unavailable"
+                summary+=("$(summary_line "$op_short" "$repo" "$tag" "—" "UNRESOLVED")")
+                failed+=("${op_short}:${tag}")
+            fi
             continue
         fi
 
@@ -412,16 +420,16 @@ main() {
             case "$tag_status" in
                 "OK (tag matches)")
                     summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "OK" "$url")")
-                    skipped+=("$op_short")
+                    skipped+=("${op_short}:v${version}")
                     ;;
                 "NEEDS TAG")
                     summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "NEEDS TAG" "$url")")
-                    tagged+=("$op_short")
+                    tagged+=("${op_short}:v${version}")
                     ;;
                 MISMATCH*)
                     local existing_commit="${tag_status#MISMATCH }"
                     summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "MISMATCH" "$url")")
-                    failed+=("$op_short")
+                    failed+=("${op_short}:v${version}")
                     ;;
             esac
             continue
@@ -434,19 +442,19 @@ main() {
         case "$result" in
             created)
                 summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "CREATED" "$url")")
-                tagged+=("$op_short")
+                tagged+=("${op_short}:v${version}")
                 ;;
             exists)
                 summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "OK" "$url")")
-                skipped+=("$op_short")
+                skipped+=("${op_short}:v${version}")
                 ;;
             skipped)
                 summary+=("$(summary_line "$op_short" "$repo" "v${version}" "—" "SKIPPED")")
-                skipped+=("$op_short")
+                skipped+=("${op_short}:v${version}")
                 ;;
             *)
                 summary+=("$(summary_line "$op_short" "$repo" "v${version}" "$short_commit" "FAILED" "$url")")
-                failed+=("$op_short")
+                failed+=("${op_short}:v${version}")
                 ;;
         esac
     done
@@ -461,9 +469,9 @@ main() {
     done
     echo ""
 
-    [[ ${#tagged[@]} -eq 0 ]]  || info "Tagged: ${tagged[*]}"
-    [[ ${#skipped[@]} -eq 0 ]] || info "Skipped (already existed): ${skipped[*]}"
-    [[ ${#failed[@]} -eq 0 ]]  || warn "Failed: ${failed[*]}"
+    [[ ${#tagged[@]} -eq 0 ]]  || info "Tagged: $(group_by_operator "${tagged[@]}")"
+    [[ ${#skipped[@]} -eq 0 ]] || info "Skipped (already existed): $(group_by_operator "${skipped[@]}")"
+    [[ ${#failed[@]} -eq 0 ]]  || warn "Failed: $(group_by_operator "${failed[@]}")"
 
     log "Done."
 }
