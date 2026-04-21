@@ -42,7 +42,7 @@
             ],
             "postUpgradeTasks": {
                 "commands": [
-                    "scripts/update-tekton-params.sh"
+                    "[ ! -x scripts/update-tekton-params.sh ] || scripts/update-tekton-params.sh"
                 ],
                 "fileFilters": [
                     ".tekton/**"
