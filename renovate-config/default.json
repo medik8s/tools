@@ -32,6 +32,23 @@
                 "dockerfile"
             ],
             "automerge": true
+        },
+        {
+            "description": [
+                "Update .tekton params when submodule updates"
+            ],
+            "matchManagers": [
+                "git-submodules"
+            ],
+            "postUpgradeTasks": {
+                "commands": [
+                    "[ ! -x scripts/update-tekton-params.sh ] || scripts/update-tekton-params.sh"
+                ],
+                "fileFilters": [
+                    ".tekton/**"
+                ],
+                "executionMode": "branch"
+            }
         }
     ]
 }
