@@ -1,4 +1,4 @@
-FROM registry.redhat.io/ubi9/ubi:9.6-1747219013
+FROM registry.redhat.io/ubi9/ubi:9.7-1776834047
 WORKDIR /app
 COPY README.md .
 RUN echo "Building the dummy image..." && ls -l
