@@ -22,6 +22,9 @@
             "/(^|/)Containerfile.*$/"
         ]
     },
+    "allowedCommands": [
+        "^\\[ ! -x scripts/update-tekton-params\\.sh \\] \\|\\| scripts/update-tekton-params\\.sh$"
+    ],
     "packageRules": [
         {
             "description": [
