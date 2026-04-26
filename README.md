@@ -18,3 +18,48 @@ The repo layout is:
   - Includes a default preset for RHWA repos with Git Submodules and Containerfiles changes.
   - Includes a RHWA preset for RHWA repos with RPMs and external packages dependencies.
 - `renovate.json` for Mintmaker/Renovate configuration of automatic MR to update the shared Tekton Pipelines tasks
+
+## How to Manually Update RPMs
+
+> **Note:** MintMaker now supports automatic `rpms.lock.yaml` regeneration when bumping base images via the [`refresh-rpm-lockfiles`](https://github.com/konflux-ci/mintmaker-presets) preset ([KONFLUX-11483](https://redhat.atlassian.net/browse/KONFLUX-11483)). The manual process below is needed only when adding/removing packages or troubleshooting.
+
+Read [RHWA-171](https://redhat.atlassian.net/browse/RHWA-171) for the initial issue (see past changes at [FAR MR 339](https://gitlab.cee.redhat.com/dragonfly/fence-agents-remediation/-/merge_requests/339), [FAR MR 349](https://gitlab.cee.redhat.com/dragonfly/fence-agents-remediation/-/merge_requests/349)) for how we set it up and why. The [Konflux RPM lockfile docs](https://konflux.pages.redhat.com/docs/users/building/activation-keys-subscription.html#configuring-an-rpm-lockfile-for-hermetic-builds) are the best source for enabling new and removing old packages, and then creating a new `rpms.lock.yaml` for hermetic builds.
+
+Below are the steps assuming the repo was already onboarded (using FAR as an example):
+
+1. Enter the FAR repo directory.
+2. Run a UBI container matching your current base image:
+   ```bash
+   podman run --rm -it -v $(pwd):/source:Z registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350
+   ```
+   Use the tag from your [Containerfile](https://gitlab.cee.redhat.com/dragonfly/fence-agents-remediation/-/blob/far-0-7/Containerfile.fence-agents-remediation?ref_type=heads#L15).
+3. Register with your activation key:
+   ```bash
+   subscription-manager register --activationkey="$KEY_NAME" --org="$ORG_ID"
+   ```
+4. Install the tools needed to run a [recent rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype/tags):
+   ```bash
+   microdnf install -y pip skopeo
+   microdnf install python3-dnf vi -y
+   pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.21.0.tar.gz
+   ```
+5. Copy the default repository file configured by subscription-manager to the source directory:
+   ```bash
+   cp /etc/yum.repos.d/redhat.repo /source/redhat.repo
+   ```
+6. Substitute the current architecture with `$basearch` in `redhat.repo` to facilitate fetching for multiple architectures:
+   ```bash
+   sed -i "s/$(uname -m)/\$basearch/g" /source/redhat.repo
+   ```
+7. Authenticate to the Red Hat container registry using your Red Hat Customer Portal credentials:
+   ```bash
+   skopeo login registry.redhat.io
+   ```
+8. Generate the lockfile:
+   ```bash
+   cd /source; rpm-lockfile-prototype -f Containerfile.fence-agents-remediation rpms.in.yaml
+   ```
+
+### SSL Key & Cert
+
+After generating the lockfile, update `redhat.repo` with MintMaker's custom authentication certificate and key for each repository. See [RPM lockfile with RPMs that require subscription](https://konflux.pages.redhat.com/docs/users/mintmaker/rpm-lockfile.html#rpm-lockfile-with-rpms-that-require-subscription) and note the required changes after a manual update to the lockfile.
