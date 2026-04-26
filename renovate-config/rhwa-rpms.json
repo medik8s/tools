@@ -3,6 +3,9 @@
     "description": [
         "RHWA preset for RHWA repos with RPMs and external packages dependencies"
     ],
+    "extends": [
+        "github>konflux-ci/mintmaker-presets:refresh-rpm-lockfiles"
+    ],
     "git-submodules": {
         "description": [
             "Schedule git-submodules changes on any time Mintmaker is available (every 4 hours) and auto-merge them"
@@ -58,23 +61,6 @@
                 ],
                 "fileFilters": [
                     ".tekton/**"
-                ],
-                "executionMode": "branch"
-            }
-        },
-        {
-            "description": [
-                "Regenerate RPM lockfile when Dockerfile base image updates"
-            ],
-            "matchManagers": [
-                "dockerfile"
-            ],
-            "postUpgradeTasks": {
-                "commands": [
-                    "rpm-lockfile-prototype rpms.in.yaml"
-                ],
-                "fileFilters": [
-                    "rpms.lock.yaml"
                 ],
                 "executionMode": "branch"
             }
