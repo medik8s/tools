@@ -3,6 +3,7 @@
     "description": [
         "RHWA preset for RHWA repos with RPMs and external packages dependencies"
     ],
+    "dependencyDashboard": true,
     "extends": [
         "github>konflux-ci/mintmaker-presets:refresh-rpm-lockfiles"
     ],
