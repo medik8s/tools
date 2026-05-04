@@ -156,11 +156,13 @@ spec:
       description: Full version following semver format
       name: semver-version
       type: string
-    - default: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    # DEPRECATED: no longer used for the build; resolved at runtime by resolve-upstream-commit task.
+    # Can be removed once all .tekton/ PipelineRun files stop passing these params.
+    - default: "deprecated"
       description: Full upstream commit sha sum result
       name: upstream-commit
       type: string
-    - default: "xxxxxxx"
+    - default: "deprecated"
       description: Short upstream commit sha sum result
       name: upstream-short-commit
       type: string
@@ -249,6 +251,56 @@ spec:
           workspace: workspace
         - name: basic-auth
           workspace: git-auth
+    - name: resolve-upstream-commit
+      params:
+        - name: dockerfile
+          value: $(params.dockerfile)
+      runAfter:
+        - clone-repository
+      taskSpec:
+        params:
+          - name: dockerfile
+            type: string
+        results:
+          - name: upstream-short-commit
+            description: Short commit SHA of the upstream submodule
+        steps:
+          - name: resolve-commit
+            image: quay.io/konflux-ci/appstudio-utils:ab6b0b8e40e440158e7288c73aff1cf83a2cc8a9@sha256:24179f0efd06c65d16868c2d7eb82573cce8e43533de6cea14fec3b7446e0b14
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              dockerfile="$(params.dockerfile)"
+
+              # Extract UPSTREAM_SUBMODULE from Containerfile
+              if ! submodule=$(grep -m1 '^ENV UPSTREAM_SUBMODULE ' "$dockerfile" | awk '{print $NF}'); then
+                echo "ERROR: No 'ENV UPSTREAM_SUBMODULE' found in $dockerfile"
+                exit 1
+              fi
+
+              if [ -z "$submodule" ]; then
+                echo "ERROR: UPSTREAM_SUBMODULE is empty in $dockerfile"
+                exit 1
+              fi
+
+              # Get short commit from git submodule status
+              if ! short_commit=$(git submodule status "$submodule" | awk '{print substr($1,2,7)}'); then
+                echo "ERROR: Failed to get submodule status for $submodule"
+                exit 1
+              fi
+
+              if [ -z "$short_commit" ]; then
+                echo "ERROR: Could not extract commit for submodule $submodule"
+                exit 1
+              fi
+
+              echo "Resolved $dockerfile -> $submodule -> $short_commit"
+              echo -n "$short_commit" | tee $(results.upstream-short-commit.path)
+            workingDir: $(workspaces.source.path)
+      workspaces:
+        - name: source
+          workspace: workspace
     - name: prefetch-dependencies
       params:
         - name: input
@@ -300,7 +352,7 @@ spec:
           value: $(params.privileged-nested)
         - name: LABELS
           value:
-            - "upstream-version=release-0.$(params.upstream-minor-version)-$(params.upstream-short-commit)"
+            - "upstream-version=release-0.$(params.upstream-minor-version)-$(tasks.resolve-upstream-commit.results.upstream-short-commit)"
             - "release=$(params.artifact-version)-$(tasks.clone-repository.results.commit-timestamp)" # incorporating the artifact-version and timestamp
             - "version=$(params.semver-version)" # version label
             - "vcs-ref=$(tasks.clone-repository.results.commit)"
@@ -310,6 +362,7 @@ spec:
           value: $(params.buildah-format)
       runAfter:
         - prefetch-dependencies
+        - resolve-upstream-commit
       taskRef:
         params:
           - name: name
