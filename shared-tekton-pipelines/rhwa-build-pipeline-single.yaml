@@ -292,14 +292,12 @@ spec:
             dockerfile="$(params.dockerfile)"
 
             # Extract UPSTREAM_SUBMODULE from Containerfile
-            if ! submodule=$(grep -m1 '^ENV UPSTREAM_SUBMODULE ' "$dockerfile" | awk '{print $NF}'); then
-              echo "ERROR: No 'ENV UPSTREAM_SUBMODULE' found in $dockerfile"
-              exit 1
-            fi
+            submodule=$(grep -m1 '^ENV UPSTREAM_SUBMODULE ' "$dockerfile" | awk '{print $NF}') || true
 
             if [ -z "$submodule" ]; then
-              echo "ERROR: UPSTREAM_SUBMODULE is empty in $dockerfile"
-              exit 1
+              echo "No UPSTREAM_SUBMODULE in $dockerfile, returning n/a"
+              echo -n "n/a" | tee $(results.upstream-short-commit.path)
+              exit 0
             fi
 
             # Get short commit from git submodule status
