@@ -275,15 +275,25 @@ spec:
       results:
         - name: upstream-short-commit
           description: Short commit SHA of the upstream submodule
+      volumes:
+        - name: workdir
+          emptyDir: {}
+      stepTemplate:
+        volumeMounts:
+          - name: workdir
+            mountPath: /var/workdir
       steps:
+        - name: use-trusted-artifact
+          image: quay.io/redhat-appstudio/build-trusted-artifacts:latest@sha256:8391272c4e5011120e9e7fee2c1f339e9405366110bf239dadcbc21e953ce099
+          args:
+            - use
+            - $(params.SOURCE_ARTIFACT)=/var/workdir/source
         - name: resolve-commit
           image: quay.io/konflux-ci/appstudio-utils:ab6b0b8e40e440158e7288c73aff1cf83a2cc8a9@sha256:24179f0efd06c65d16868c2d7eb82573cce8e43533de6cea14fec3b7446e0b14
+          workingDir: /var/workdir/source
           script: |
             #!/usr/bin/env bash
             set -euo pipefail
-
-            # Use the build-trusted-artifacts script to unpack the source
-            use-trusted-artifact "$(params.SOURCE_ARTIFACT)"
 
             dockerfile="$(params.dockerfile)"
 
