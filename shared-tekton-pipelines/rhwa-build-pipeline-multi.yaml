@@ -309,7 +309,7 @@ spec:
             fi
 
             # Get short commit from git submodule status
-            if ! short_commit=$(git submodule status "$submodule" | awk '{print substr($1,2,7)}'); then
+            if ! short_commit=$(git submodule status "$submodule" | awk '{sub(/^[^0-9a-f]+/, "", $1); print substr($1,1,7)}'); then
               echo "ERROR: Failed to get submodule status for $submodule"
               exit 1
             fi
