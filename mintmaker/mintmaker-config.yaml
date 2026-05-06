@@ -1,0 +1,31 @@
+snr:
+  0-7: false
+  0-9: false
+  0-10: false
+  0-11: false
+  0-12: false
+  0-13: true
+nhc:
+  0-9: false
+  0-10: false
+  0-11: false
+  0-12: true
+nmo:
+  5-4: false
+  5-5: false
+  5-6: false
+  5-7: true
+far:
+  0-5: false
+  0-6: false
+  0-7: false
+  0-8: true
+mdr:
+  0-4: false
+  0-5: false
+  0-6: false
+  0-7: true
+sbr:
+  0-1: false
+  0-2: false
+  0-3: true
