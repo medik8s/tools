@@ -4,6 +4,8 @@
         "Default preset for RHWA repos with Git Submodules and Containerfiles changes"
     ],
     "dependencyDashboard": true,
+    "prConcurrentLimit": 50,
+    "prHourlyLimit": 10,
     "git-submodules": {
         "description": [
             "Schedule git-submodules changes on any time Mintmaker is available (every 4 hours) and auto-merge them"
