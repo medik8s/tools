@@ -23,6 +23,17 @@
             "/(^|/)Containerfile.*$/"
         ]
     },
+    "tekton": {
+        "description": [
+            "Track Tekton task and pipeline bundle digest updates in .tekton/ files"
+        ],
+        "managerFilePatterns": [
+            ".tekton/**"
+        ],
+        "schedule": [
+            "at any time"
+        ]
+    },
     "packageRules": [
         {
             "description": [
@@ -30,7 +41,8 @@
             ],
             "matchManagers": [
                 "git-submodules",
-                "dockerfile"
+                "dockerfile",
+                "tekton"
             ],
             "automerge": true
         }
