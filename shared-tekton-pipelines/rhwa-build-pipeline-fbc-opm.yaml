@@ -4,6 +4,7 @@ metadata:
   name: rhwa-build-pipeline-fbc-opm
   labels:
     pipelines.openshift.io/used-by: rhwa-fbc-tekton
+    app.kubernetes.io/version: "devel"
 spec:
   description: |
     This pipeline is ideal for building and verifying [file-based catalogs](https://konflux-ci.dev/docs/end-to-end/building-olm/#building-the-file-based-catalog).

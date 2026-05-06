@@ -4,6 +4,7 @@ metadata:
   name: rhwa-build-pipeline
   labels:
     pipelines.openshift.io/used-by: rhwa-tekton
+    app.kubernetes.io/version: "devel"
 spec:
   description: |
     This pipeline is ideal for building container images from a Containerfile while reducing network traffic.
