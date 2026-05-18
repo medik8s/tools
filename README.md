@@ -32,16 +32,15 @@ Below are the steps assuming the repo was already onboarded (using FAR as an exa
    ```bash
    podman run --rm -it -v $(pwd):/source:Z registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350
    ```
-   Use the tag from your [Containerfile](https://gitlab.cee.redhat.com/dragonfly/fence-agents-remediation/-/blob/far-0-7/Containerfile.fence-agents-remediation?ref_type=heads#L15).
-3. Register with your activation key:
+   Use the tag from your [Containerfile](https://gitlab.cee.redhat.com/dragonfly/fence-agents-remediation/-/blob/far-0-8/Containerfile.fence-agents-remediation?ref_type=heads#L17).
+3. Install the tools needed to run a [recent rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype/tags):
+   ```bash
+   microdnf install -y subscription-manager pip skopeo python3-dnf vi
+   pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.21.0.tar.gz
+   ```
+4. Register with your activation key:
    ```bash
    subscription-manager register --activationkey="$KEY_NAME" --org="$ORG_ID"
-   ```
-4. Install the tools needed to run a [recent rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype/tags):
-   ```bash
-   microdnf install -y pip skopeo
-   microdnf install python3-dnf vi -y
-   pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.21.0.tar.gz
    ```
 5. Copy the default repository file configured by subscription-manager to the source directory:
    ```bash
@@ -62,4 +61,21 @@ Below are the steps assuming the repo was already onboarded (using FAR as an exa
 
 ### SSL Key & Cert
 
-After generating the lockfile, update `redhat.repo` with MintMaker's custom authentication certificate and key for each repository. See [RPM lockfile with RPMs that require subscription](https://konflux.pages.redhat.com/docs/users/mintmaker/rpm-lockfile.html#rpm-lockfile-with-rpms-that-require-subscription) and note the required changes after a manual update to the lockfile.
+After generating the lockfile, replace the hardcoded SSL certificate and key paths in `redhat.repo` with `$SSL_CLIENT_CERT` and `$SSL_CLIENT_KEY` variables for MintMaker automatic updates:
+
+```bash
+sed -i 's|sslclientcert=/etc/pki/entitlement-host/.*\.pem|sslclientcert=$SSL_CLIENT_CERT|' /source/redhat.repo
+sed -i 's|sslclientkey=/etc/pki/entitlement-host/.*-key\.pem|sslclientkey=$SSL_CLIENT_KEY|' /source/redhat.repo
+```
+
+See [RPM lockfile with RPMs that require subscription](https://konflux.pages.redhat.com/docs/users/mintmaker/rpm-lockfile.html#rpm-lockfile-with-rpms-that-require-subscription).
+
+### Multiple Architectures (Optional)
+
+If the Containerfile installs different packages per architecture (e.g., FAR's cloud fence agents are only available on x86_64), `rpm-lockfile-prototype` will fail when trying to resolve all architectures at once. Instead, generate a separate lockfile per architecture: run step 8, save the resulting `rpms.lock.yaml` with an arch-specific name (e.g., `rpms.lock.x86_64.yaml`), modify `rpms.in.yaml` for the next architecture, and re-run step 8. Then combine the lockfiles by appending the `arches` blocks:
+
+```bash
+LINE=$(grep -n '^- arch:' rpms.lock.s390x.yaml | head -1 | cut -d: -f1)
+cp rpms.lock.x86_64.yaml rpms.lock.yaml
+tail -n +$LINE rpms.lock.s390x.yaml >> rpms.lock.yaml
+```
