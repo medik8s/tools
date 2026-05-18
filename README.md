@@ -72,7 +72,9 @@ See [RPM lockfile with RPMs that require subscription](https://konflux.pages.red
 
 ### Multiple Architectures (Optional)
 
-If the Containerfile installs different packages per architecture (e.g., FAR's cloud fence agents are only available on x86_64), `rpm-lockfile-prototype` will fail when trying to resolve all architectures at once. Instead, generate a separate lockfile per architecture: run step 8, save the resulting `rpms.lock.yaml` with an arch-specific name (e.g., `rpms.lock.x86_64.yaml`), modify `rpms.in.yaml` for the next architecture, and re-run step 8. Then combine the lockfiles by appending the `arches` blocks:
+> **Note:** This section is only needed when the Containerfile installs different packages per architecture (e.g., FAR's cloud fence agents are only available on x86_64). If all architectures install the same packages, `rpm-lockfile-prototype` resolves them in a single run and this section can be skipped.
+
+When packages differ across architectures, `rpm-lockfile-prototype` will fail trying to resolve all of them at once. Instead, generate a separate lockfile per architecture: run step 8, save the resulting `rpms.lock.yaml` with an arch-specific name (e.g., `rpms.lock.x86_64.yaml`), modify `rpms.in.yaml` for the next architecture, and re-run step 8. Then combine the lockfiles by appending the `arches` blocks:
 
 ```bash
 LINE=$(grep -n '^- arch:' rpms.lock.s390x.yaml | head -1 | cut -d: -f1)
