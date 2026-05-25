@@ -21,24 +21,32 @@
 #   NHC_CONSOLE_PLUGIN_WAIT  Seconds to wait for that CR after CSV install (default: 300)
 #
 # Usage:
-#   ./scripts/install_rhwa_operators.sh
-#   ./scripts/install_rhwa_operators.sh --only snr,nhc
-#   ./scripts/install_rhwa_operators.sh --channel stable-4.12 --catsrc redhat-operators
-#   ./scripts/install_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
-#   ./scripts/install_rhwa_operators.sh --kubeconfig-from root@192.168.1.10 --only nhc
-#   ./scripts/install_rhwa_operators.sh --kubeconfig-from bastion --kubeconfig-path /home/kni/clusterconfigs/auth/kubeconfig
-#   ./scripts/install_rhwa_operators.sh --catsrc rhwa-konflux-test-1141449 --create-idms
+#   ./helper_scripts/install_rhwa_operators.sh
+#   ./helper_scripts/install_rhwa_operators.sh --only snr,nhc
+#   ./helper_scripts/install_rhwa_operators.sh --channel stable-4.12 --catsrc redhat-operators
+#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
+#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from root@192.168.1.10 --only nhc
+#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from bastion --kubeconfig-path /home/kni/clusterconfigs/auth/kubeconfig
+#   ./helper_scripts/install_rhwa_operators.sh --catsrc rhwa-konflux-test-1141449 --create-idms
 #
-# Standalone: this script has no companion files; --create-idms embeds the Konflux mirror map.
+# Requires helper_scripts/lib/rhwa_utils.sh (sourced from the same directory). Clone or copy the
+#   full helper_scripts/ tree. --create-idms embeds the Konflux mirror map.
 #   Requires on PATH: oc; jq only when using --create-idms. For --create-idms with a custom catalog
 #   while the same packages also exist in redhat/community catalogs, install opm so the script can
 #   opm render the CatalogSource index image and read bundle relatedImages (PackageManifest is ambiguous).
 #
-#   then: ./scripts/install_rhwa_operators.sh --catsrc rhwa-operators --create-idms
+#   then: ./helper_scripts/install_rhwa_operators.sh --catsrc rhwa-operators --create-idms
 #   IDMS YAML is written next to this script: <script-dir>/idms/
 ################################################################################
 
 set -euo pipefail
+
+_kubeconfig_tmp=""
+_subs_tmp=""
+_rhwa_cleanup() {
+  rm -f "${_kubeconfig_tmp}" "${_subs_tmp}"
+}
+trap _rhwa_cleanup EXIT
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,6 +65,8 @@ IDMS_WAIT_TIMEOUT=600
 KUBECONFIG_FROM=""
 KUBECONFIG_REMOTE_PATH="/root/.kube/config"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/rhwa_utils.sh
+source "${SCRIPT_DIR}/lib/rhwa_utils.sh"
 # NHC console plugin name (ConsolePlugin.metadata.name created by NHC operator)
 NHC_CONSOLE_PLUGIN_NAME="${NHC_CONSOLE_PLUGIN_NAME:-node-remediation-console-plugin}"
 NHC_CONSOLE_PLUGIN_WAIT="${NHC_CONSOLE_PLUGIN_WAIT:-300}"
@@ -235,15 +245,7 @@ rhwa_create_idms_from_catsrc() {
   local idx_image
   idx_image=$(oc get catalogsource "$catsrc" -n "$catsrc_ns" -o jsonpath='{.spec.image}' 2>/dev/null || echo "")
 
-  echo -e "${GREEN}Waiting for CatalogSource ${catsrc} (${catsrc_ns}) to be READY (timeout ${wait_timeout}s)...${NC}"
-  if ! oc wait --for=jsonpath='{.status.connectionState.lastObservedState}'=READY \
-    "catalogsource/${catsrc}" -n "${catsrc_ns}" --timeout="${wait_timeout}s" 2>/dev/null; then
-    local state
-    state=$(oc get "catalogsource/${catsrc}" -n "${catsrc_ns}" \
-      -o jsonpath='{.status.connectionState.lastObservedState}{" "}{.status.connectionState.message}{"\n"}' 2>/dev/null || echo "unknown")
-    echo -e "${RED}CatalogSource not READY: ${state}${NC}" >&2
-    return 1
-  fi
+  rhwa_wait_catsrc_ready "$catsrc" "$catsrc_ns" "$wait_timeout" || return 1
   echo -e "${GREEN}CatalogSource is READY.${NC}"
 
   local _pm_deadline=$(($(date +%s) + 120)) found
@@ -440,14 +442,15 @@ if [[ "$APPROVAL" != "Manual" && "$APPROVAL" != "Automatic" ]]; then
   exit 1
 fi
 
-# Optional: fetch kubeconfig from remote host via SSH (root user)
+# Optional: fetch kubeconfig from remote host via SSH (defaults to root@).
+# StrictHostKeyChecking=accept-new is intentional for QE lab hosts — a MITM on first
+# connect could intercept the kubeconfig; do not use this on untrusted networks.
 if [[ -n "${KUBECONFIG_FROM:-}" ]]; then
   _ssh_target="$KUBECONFIG_FROM"
   if [[ "$_ssh_target" != *"@"* ]]; then
     _ssh_target="root@${_ssh_target}"
   fi
   _kubeconfig_tmp=$(mktemp --suffix=.kubeconfig.rhwa.XXXXXX)
-  trap 'rm -f "$_kubeconfig_tmp"' EXIT
   echo -e "${GREEN}Downloading kubeconfig from ${_ssh_target}:${KUBECONFIG_REMOTE_PATH}${NC}"
   if ! ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$_ssh_target" cat "$KUBECONFIG_REMOTE_PATH" > "$_kubeconfig_tmp"; then
     echo -e "${RED}Failed to get kubeconfig from ${_ssh_target}. Ensure SSH key or password access for root.${NC}" >&2
@@ -592,9 +595,10 @@ fi
 # (e.g. self-node-remediation-stable-redhat-operators-openshift-marketplace). Run twice
 # and use a temp file so we don't miss any (no subshell from pipe).
 echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
+_subs_tmp=$(mktemp)
 for _pass in 1 2; do
   [[ $_pass -eq 2 ]] && sleep 3
-  oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > /tmp/rhwa_subs_$$.txt || true
+  oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_subs_tmp" || true
   while read -r sub_meta_name spec_name; do
     [[ -z "$sub_meta_name" ]] && continue
     # Is this one of our packages?
@@ -608,8 +612,7 @@ for _pass in 1 2; do
         break
       fi
     done
-  done < /tmp/rhwa_subs_$$.txt 2>/dev/null || true
-  rm -f /tmp/rhwa_subs_$$.txt
+  done < "$_subs_tmp" 2>/dev/null || true
 done
 
 echo ""
