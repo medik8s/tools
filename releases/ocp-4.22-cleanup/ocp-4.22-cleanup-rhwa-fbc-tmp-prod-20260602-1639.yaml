@@ -1,0 +1,8 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: ocp-4.22-cleanup-rhwa-fbc-tmp-prod-20260602-1639
+  namespace: rhwa-tenant
+spec:
+  releasePlan: rhwa-fbc-tmp-releaseplan-prod
+  snapshot: rhwa-fbc-tmp-20260601-135303-000
