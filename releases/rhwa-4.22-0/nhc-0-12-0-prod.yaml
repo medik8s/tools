@@ -1,0 +1,25 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: nhc-0-12-0-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: nhc-0-12-releaseplan-prod
+  snapshot: nhc-0-12-20260527-135929-000
+  data:
+    releaseNotes:
+      type: RHBA
+      issues:
+        fixed:
+          - id: RHWA-514
+            source: issues.redhat.com
+          - id: RHWA-295
+            source: issues.redhat.com
+          - id: RHWA-356
+            source: issues.redhat.com
+          - id: RHWA-986
+            source: issues.redhat.com
+          - id: RHWA-751
+            source: issues.redhat.com
+          - id: RHWA-928
+            source: issues.redhat.com
