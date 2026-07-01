@@ -1,0 +1,15 @@
+# Kind cluster configuration for medik8s development
+# Creates 1 control-plane + 3 worker nodes.
+# SNR requires 2+ workers for peer health checks.
+# Single CP is sufficient for development; multi-CP etcd quorum testing
+# requires a real OpenShift cluster.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/16"
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker

@@ -1,0 +1,325 @@
+# dev.mk — Shared Makefile targets for medik8s local development
+#
+# Include this from any operator's Makefile:
+#   TOOLS_DIR ?= $(shell cd .. && pwd)/tools
+#   -include $(TOOLS_DIR)/dev/dev.mk
+#
+# All targets are prefixed with 'dev-' to avoid collisions.
+
+# Dev environment configuration
+MEDIK8S_CLUSTER_NAME ?= medik8s-dev
+MEDIK8S_NAMESPACE ?= medik8s-system
+TOOLS_DIR ?= $(shell cd .. && pwd)/tools
+DEV_DIR := $(TOOLS_DIR)/dev
+
+# Detect cluster type: "kind" if a Kind cluster exists, "external" otherwise.
+# Uses CONTAINER_TOOL to set KIND_EXPERIMENTAL_PROVIDER (needed for podman).
+# When SKIP_KIND=true, force external mode (the user explicitly opted out of Kind).
+# Override with DEV_CLUSTER_TYPE=external to force external mode in other cases.
+ifeq ($(SKIP_KIND),true)
+  DEV_CLUSTER_TYPE ?= external
+else
+  DEV_CLUSTER_TYPE ?= $(shell \
+    if KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get clusters 2>/dev/null | grep -q '^$(MEDIK8S_CLUSTER_NAME)$$'; then echo kind; \
+    elif $(KUBECTL) cluster-info --context 'kind-$(MEDIK8S_CLUSTER_NAME)' >/dev/null 2>&1; then echo kind; \
+    else echo external; \
+    fi \
+  )
+endif
+
+# Image delivery:
+#   local:    loaded directly into Kind nodes (no registry, no pull)
+#   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required)
+#
+# Defaults to "local" for Kind clusters, "ttl.sh" for external.
+# Set DEV_REGISTRY=ttl.sh to force using ttl.sh even with Kind.
+DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),local,ttl.sh)
+TTL_SH_TTL ?= 2h
+ifeq ($(DEV_REGISTRY),local)
+  DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
+else
+  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell echo $$USER | head -c 8):$(TTL_SH_TTL)
+endif
+
+# CONTAINER_TOOL defines the container tool to be used for building images.
+# By default uses docker if available, falls back to podman.
+# You may also set CONTAINER_TOOL directly as an environment variable.
+CONTAINER_TOOL ?= $(shell \
+  if command -v docker >/dev/null 2>&1; then echo docker; \
+  elif command -v podman >/dev/null 2>&1; then echo podman; \
+  else echo ""; \
+  fi \
+)
+ifeq ($(CONTAINER_TOOL),)
+  $(error No container tool found. Please install docker or podman.)
+endif
+
+# Detect kubectl or oc
+KUBECTL ?= $(shell \
+  if command -v kubectl >/dev/null 2>&1; then echo kubectl; \
+  elif command -v oc >/dev/null 2>&1; then echo oc; \
+  else echo ""; \
+  fi \
+)
+ifeq ($(KUBECTL),)
+  $(error No kubectl or oc found. Please install kubectl or oc.)
+endif
+
+# Verify Go is available
+ifeq ($(shell command -v go 2>/dev/null),)
+  $(error Go not found. Please install Go from https://go.dev/doc/install or add it to your PATH.)
+endif
+
+# Warn early if OPERATOR_NAME is not set — dev-build and dev-deploy will fail without it.
+ifndef OPERATOR_NAME
+  $(warning OPERATOR_NAME is not set. Targets dev-build, dev-deploy, dev-redeploy will not work.)
+endif
+
+export MEDIK8S_CLUSTER_NAME
+export MEDIK8S_NAMESPACE
+
+# Helper to find the namespace for this operator's deployment.
+# Looks for deployments with the controller-manager label, filtering by operator name.
+_dev_find_ns = $(shell \
+  NS=$$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | grep -i '$(OPERATOR_NAME)\|$(subst -,.,$(OPERATOR_NAME))' | head -1); \
+  if [ -z "$$NS" ]; then \
+    NS=$$($(KUBECTL) get deployment -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null | grep '$(OPERATOR_NAME)' | awk '{print $$1}' | head -1); \
+  fi; \
+  echo "$$NS" \
+)
+
+##@ Dev Environment
+
+.PHONY: dev-setup
+dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters)
+ifeq ($(SKIP_KIND),true)
+	@$(DEV_DIR)/setup.sh --skip-kind
+else
+	@$(DEV_DIR)/setup.sh
+endif
+
+.PHONY: dev-teardown
+dev-teardown: ## Destroy the Kind dev cluster
+ifeq ($(SKIP_KIND),true)
+	@echo "External cluster — nothing to tear down. Use 'make dev-undeploy' to remove operators."
+else
+	@$(DEV_DIR)/teardown.sh
+endif
+
+.PHONY: dev-build
+dev-build: ## Build operator image and load into Kind or push to ttl.sh
+	@# For Kind: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
+	@# For external: keep imagePullPolicy as Always (image pulled from ttl.sh).
+	@# The SNR controller reconciles DaemonSets from templates baked into the image,
+	@# so this must be done before the container build, not after.
+	@# Files are restored after build (even on failure) via trap.
+ifeq ($(DEV_REGISTRY),local)
+	@patched=""; \
+	for f in $$(find install/ -name '*.yaml' 2>/dev/null); do \
+		if grep -q 'imagePullPolicy: Always' "$$f"; then \
+			sed -i 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/' "$$f"; \
+			patched="$$patched $$f"; \
+			echo "  Patched $$f imagePullPolicy for dev build."; \
+		fi; \
+	done; \
+	restore() { for f in $$patched; do sed -i 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/' "$$f"; done; }; \
+	trap restore EXIT; \
+	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	$(CONTAINER_TOOL) save -o /tmp/dev-image-$(OPERATOR_NAME).tar $(DEV_IMG)
+	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
+		kind load image-archive /tmp/dev-image-$(OPERATOR_NAME).tar --name $(MEDIK8S_CLUSTER_NAME)
+	rm -f /tmp/dev-image-$(OPERATOR_NAME).tar
+else
+	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	$(CONTAINER_TOOL) push $(DEV_IMG)
+	@echo ""
+	@echo "  Image pushed to $(DEV_IMG)"
+	@echo "  Image will expire after $(TTL_SH_TTL)."
+endif
+
+.PHONY: dev-deploy
+dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, install CRDs, and deploy operator
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(DEV_IMG)
+	@# Use envsubst if the operator provides one (SNR uses ${IMG} in manifests)
+	@ENVSUBST_BIN="$(ENVSUBST)"; \
+	if [ -n "$$ENVSUBST_BIN" ] && [ -x "$$ENVSUBST_BIN" ]; then \
+		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
+	else \
+		$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -; \
+	fi
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
+	@# Detect the operator namespace from kustomization files (reliable, no cluster query needed).
+	@# The namespace may be in config/default/ or in a component/patch kustomization.yaml.
+	@NS=$$(grep -rh '^namespace:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null | head -1 | awk '{print $$2}'); \
+	if [ -z "$$NS" ]; then \
+		NS=$$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | grep -i '$(OPERATOR_NAME)' | head -1); \
+	fi; \
+	if [ -n "$$NS" ]; then \
+		DEPLOY=$$($(KUBECTL) get deployment -n $$NS --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		SVC=$$($(KUBECTL) get svc -n $$NS --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep webhook | head -1); \
+		if [ -n "$$DEPLOY" ] && [ -n "$$SVC" ]; then \
+			$(DEV_DIR)/enable-certmanager.sh $$NS $$DEPLOY $$SVC; \
+		else \
+			echo "  Skipping cert-manager setup (no webhook service found)."; \
+		fi; \
+		DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		if [ -n "$$DEPLOY" ]; then \
+			echo "=== Waiting for operator deployment to be ready ==="; \
+			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
+				echo "Warning: deployment $$DEPLOY is not ready. Check logs with 'make dev-logs'."; \
+		fi; \
+	else \
+		echo "  Skipping cert-manager setup (deployment not found)."; \
+	fi
+	@# Create NHC CR after webhooks are ready (cert-manager must be configured first)
+	@if $(KUBECTL) get crd nodehealthchecks.remediation.medik8s.io &>/dev/null && \
+	    $(KUBECTL) get selfnoderemediationtemplate -A --no-headers 2>/dev/null | grep -q .; then \
+		$(DEV_DIR)/create-nhc.sh; \
+	fi
+
+.PHONY: dev-undeploy
+dev-undeploy: ## Remove operator from dev cluster
+	@if [ -n "$(KUSTOMIZE)" ] && [ -f config/default/kustomization.yaml ]; then \
+		$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found -f -; \
+	else \
+		NS="$(_dev_find_ns)"; \
+		if [ -n "$$NS" ]; then \
+			echo "Deleting namespace $$NS..."; \
+			$(KUBECTL) delete namespace "$$NS" --ignore-not-found; \
+		else \
+			echo "No operator deployment found to undeploy."; \
+		fi; \
+	fi
+
+.PHONY: dev-redeploy
+dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
+	@NS="$(_dev_find_ns)"; \
+	if [ -n "$$NS" ]; then \
+		echo "Deleting operator pods in $$NS to pick up new image..."; \
+		$(KUBECTL) delete pods -n $$NS -l control-plane=controller-manager --force --grace-period=0 2>/dev/null || true; \
+		DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		if [ -n "$$DEPLOY" ]; then \
+			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
+				echo "Warning: deployment is not ready. Check logs with 'make dev-logs'."; \
+		fi; \
+	else \
+		echo "Could not find deployment to restart. Run 'make dev-deploy' first."; \
+	fi
+
+.PHONY: dev-logs
+dev-logs: ## Tail operator controller-manager logs
+	@NS="$(_dev_find_ns)"; \
+	if [ -n "$$NS" ]; then \
+		POD=$$($(KUBECTL) get pods -n $$NS -l control-plane=controller-manager -o name 2>/dev/null | head -1); \
+		if [ -n "$$POD" ]; then \
+			$(KUBECTL) logs -f -n $$NS $$POD --all-containers --tail=50; \
+		else \
+			echo "No controller-manager pod found in $$NS. Is the operator running?"; \
+		fi; \
+	else \
+		echo "No controller-manager pod found. Run 'make dev-deploy' first."; \
+	fi
+
+.PHONY: dev-wait
+dev-wait: ## Wait for all medik8s operator pods to be ready
+	@echo "=== Waiting for operator deployments to be ready ==="
+	@FOUND=false; \
+	for ns in $$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+		for deploy in $$($(KUBECTL) get deployment -n $$ns -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
+			FOUND=true; \
+			echo "  Waiting for $$ns/$$deploy..."; \
+			$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=120s || \
+				echo "  Warning: $$ns/$$deploy is not ready."; \
+		done; \
+	done; \
+	if [ "$$FOUND" = false ]; then \
+		echo "  No operator deployments found. Run 'make dev-deploy' first."; \
+	fi
+
+.PHONY: dev-events
+dev-events: ## Show recent events related to medik8s resources
+	@echo "=== Recent Events (last 10 minutes) ==="
+	@$(KUBECTL) get events -A --sort-by=.lastTimestamp --field-selector reason!=Pulling,reason!=Pulled 2>/dev/null | \
+		grep -iE 'remediat|healthcheck|maintenance|fence|unhealthy|notready|taint' || \
+		echo "  No remediation-related events found."
+	@echo ""
+	@echo "=== All Recent Events ==="
+	@$(KUBECTL) get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -20
+
+.PHONY: dev-summary
+dev-summary: ## Show remediation flow timeline (what happened during simulate/recover)
+	@$(DEV_DIR)/summary.sh
+
+.PHONY: dev-describe
+dev-describe: ## Full summary of all medik8s resources (nodes, pods, CRs, leases, events)
+	@$(DEV_DIR)/describe.sh
+
+.PHONY: dev-shell
+dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worker)
+	@NODES=$$(kind get nodes --name $(MEDIK8S_CLUSTER_NAME) 2>/dev/null); \
+	if [ -z "$$NODES" ]; then \
+		NODES=$$($(KUBECTL) get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); \
+	fi; \
+	if [ -z "$$NODES" ]; then \
+		echo "No nodes found. Is the cluster running?"; \
+		exit 1; \
+	fi; \
+	TARGET="$(NODE)"; \
+	if [ -z "$$TARGET" ]; then \
+		TARGET=$$(echo "$$NODES" | grep worker | head -1); \
+	fi; \
+	if [ -z "$$TARGET" ]; then \
+		TARGET=$$(echo "$$NODES" | head -1); \
+	fi; \
+	echo "Opening shell on $$TARGET..."; \
+	echo "  (type 'exit' to return)"; \
+	$(CONTAINER_TOOL) exec -it "$$TARGET" bash
+
+.PHONY: dev-create-nhc
+dev-create-nhc: ## Create a NodeHealthCheck CR that triggers SNR remediation
+	@$(DEV_DIR)/create-nhc.sh
+
+.PHONY: dev-simulate-failure
+dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
+	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
+
+.PHONY: dev-simulate-storm
+dev-simulate-storm: ## Simulate storm: stop kubelet on 2 workers
+	@$(DEV_DIR)/simulate-failure.sh storm
+
+.PHONY: dev-simulate-network
+dev-simulate-network: ## Block API server from a worker to test SNR peer health
+	@$(DEV_DIR)/simulate-failure.sh network-partition
+
+.PHONY: dev-recover
+dev-recover: ## Recover all workers (restart kubelet, restore network, clean CRs)
+	@$(DEV_DIR)/simulate-failure.sh recover
+
+.PHONY: dev-help
+dev-help: ## Show dev environment help
+	@echo "Medik8s Development Environment"
+	@echo ""
+	@echo "Lifecycle:"
+	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers)"
+	@echo "  make dev-teardown           Destroy cluster"
+	@echo ""
+	@echo "Build & Deploy:"
+	@echo "  make dev-build              Build image and load into Kind"
+	@echo "  make dev-deploy             Build + install CRDs + deploy operator"
+	@echo "  make dev-redeploy           Rebuild and restart (fast iteration)"
+	@echo "  make dev-undeploy           Remove operator from cluster"
+	@echo "  make dev-create-nhc         Create NodeHealthCheck CR (links NHC to SNR)"
+	@echo ""
+	@echo "Observe:"
+	@echo "  make dev-logs               Tail operator logs"
+	@echo "  make dev-describe           Full summary (nodes, pods, CRs, leases, events)"
+	@echo "  make dev-summary            Remediation flow timeline"
+	@echo "  make dev-events             Show recent remediation-related events"
+	@echo "  make dev-wait               Wait for all operator pods to be ready"
+	@echo "  make dev-shell              Open shell on a Kind node (NODE=<name>)"
+	@echo ""
+	@echo "Simulate Failures:"
+	@echo "  make dev-simulate-failure   Stop kubelet on a worker"
+	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
+	@echo "  make dev-simulate-network   Block API server from a worker"
+	@echo "  make dev-recover            Recover all workers"
