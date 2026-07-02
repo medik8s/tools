@@ -18,6 +18,11 @@ The repo layout is:
   - Includes a default preset for RHWA repos with Git Submodules and Containerfiles changes.
   - Includes a RHWA preset for RHWA repos with RPMs and external packages dependencies.
 - `renovate.json` for Mintmaker/Renovate configuration of automatic MR to update the shared Tekton Pipelines tasks
+- `helper_scripts` directory for cluster helper scripts used by QE and lab workflows:
+  - `install_rhwa_operators.sh` — install RHWA operators via classic OLM (optional IDMS generation)
+  - `sync_clustercatalog_from_catalogsource.sh` — align OLMv1 `ClusterCatalog` with a `CatalogSource`
+  - `lib/rhwa_utils.sh` — shared catalog helpers (sourced by the scripts above; not run directly)
+  - See [cluster setup workflow](docs/rhwa_cluster_setup_workflow.md), [install doc](docs/helper_scripts/install_rhwa_operator.md), and [sync doc](docs/helper_scripts/sync_clustercatalog_from_catalogsource.md)
 
 ## How to Manually Update RPMs
 
