@@ -8,6 +8,7 @@ End-to-end order for deploying RHWA operators from internal IIB or Konflux catal
 flowchart LR
   A[deploy_iib.sh] --> B[sync_clustercatalog_from_catalogsource.sh]
   B --> C[install_rhwa_operators.sh]
+  C -.->|uninstall| D[remove_rhwa_operators.sh]
 ```
 
 | Step | Script | When to use |
@@ -15,6 +16,7 @@ flowchart LR
 | 1 | `iib_deployment/deploy_iib.sh` | Deploy a brew/IIB CatalogSource (+ optional IDMS). Skip if the catalog already exists. |
 | 2 | `helper_scripts/sync_clustercatalog_from_catalogsource.sh` | OLM v1 clusters: align `ClusterCatalog` with the CatalogSource and merge brew pull secrets. Skip on classic OLM-only clusters. |
 | 3 | `helper_scripts/install_rhwa_operators.sh` | Install all five RHWA operators via Subscriptions. Use `--create-idms` when testing disconnected/Konflux mirrors. |
+| — | `helper_scripts/remove_rhwa_operators.sh` | Uninstall operators before clean reinstall or when switching catalog/channel. |
 
 Shared helpers live in `helper_scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret merge, ClusterCatalog Serving wait).
 
@@ -47,10 +49,11 @@ No IIB deploy or ClusterCatalog sync needed when using the default `redhat-opera
 ### Per-script documentation
 
 - [install_rhwa_operators.sh](helper_scripts/install_rhwa_operator.md)
+- [remove_rhwa_operators.sh](helper_scripts/remove_rhwa_operators.md)
 - [sync_clustercatalog_from_catalogsource.sh](helper_scripts/sync_clustercatalog_from_catalogsource.md)
 
 ### Troubleshooting
 
-- **CSV stuck Pending / ResolutionFailed after re-run:** orphaned CSVs from a prior install — `oc delete csv --all -n openshift-workload-availability`, then re-run install.
+- **CSV stuck Pending / ResolutionFailed after re-run:** orphaned CSVs from a prior install — run `remove_rhwa_operators.sh` or `oc delete csv --all -n openshift-workload-availability`, then re-run install.
 - **ClusterCatalog not Serving:** ensure brew pull secrets were merged (`--SYNC_PULL_SECRETS`, default on).
 - **IDMS generation fails on multi-catalog cluster:** install `opm` on the machine running the install script.

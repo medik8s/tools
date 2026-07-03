@@ -60,12 +60,10 @@ Common flags:
 - `--create-idms` — generate IDMS from the catalog index (disconnected / Konflux IIB testing)
 - `--kubeconfig-from root@<hostname>` — fetch kubeconfig over SSH for QE lab systems (see script comment on `StrictHostKeyChecking=accept-new`)
 
-### Re-installing on an existing cluster
-
-If operators were previously installed and CSVs show `Pending` / `ResolutionFailed` with *"CSV exists and is not referenced by a subscription"*, delete orphaned CSVs before re-running:
+### Re-install after removal
 
 ```bash
-oc delete csv --all -n openshift-workload-availability
+./helper_scripts/remove_rhwa_operators.sh
 ./helper_scripts/install_rhwa_operators.sh
 ```
 
