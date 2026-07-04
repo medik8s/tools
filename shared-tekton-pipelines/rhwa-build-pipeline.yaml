@@ -24,7 +24,7 @@ spec:
       taskRef:
         params:
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:3350566fdd5838366bb0c480c14270cea87f1f3ddf5765964405c6111c02893f
+            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
           - name: name
             value: slack-webhook-notification
           - name: kind
@@ -48,7 +48,7 @@ spec:
       taskRef:
         params:
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:3350566fdd5838366bb0c480c14270cea87f1f3ddf5765964405c6111c02893f
+            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
           - name: name
             value: slack-webhook-notification
           - name: kind
@@ -67,7 +67,7 @@ spec:
           - name: name
             value: show-sbom
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-show-sbom:0.1@sha256:a7346ed61237db4f82ff782e0c9e8b30536e0e67b907ad600341a6d192e80012
+            value: quay.io/konflux-ci/tekton-catalog/task-show-sbom:0.1@sha256:8fe70a95c28b1ac92abd67a7477ad960218f3f570a9f8a12ad082dff7e9c9579
           - name: kind
             value: task
         resolver: bundles
@@ -86,7 +86,7 @@ spec:
           - name: name
             value: summary
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-summary:0.2@sha256:a009e5892e0ef23f8c45fe98a96d6c56aff3bdc0343d994f30661e56ff901253
+            value: quay.io/konflux-ci/tekton-catalog/task-summary:0.2@sha256:62c465f052e15b8236aec09cc66710896e60386ea7b35c4888bb8273ff655b77
           - name: kind
             value: task
         resolver: bundles
@@ -247,7 +247,7 @@ spec:
           - name: name
             value: git-clone
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-git-clone:0.2@sha256:4b5a4e1f2bedd121810c6cec84515251f7d648a67f8847fb4d8288aed4411010
+            value: quay.io/konflux-ci/tekton-catalog/task-git-clone:0.2@sha256:14983fd4c447d40897ebd732e1b90b242dd3a1a781db92bb909366fbddd3b688
           - name: kind
             value: task
         resolver: bundles
@@ -371,7 +371,7 @@ spec:
           - name: name
             value: buildah
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-buildah:0.10@sha256:f102872025113e450b5382aa5d4236336b1f8a91d567bd264e30bc330f7d4cd6
+            value: quay.io/konflux-ci/tekton-catalog/task-buildah:0.10@sha256:8b3b5b26a9684d38861aabdeb90f7a092933b56e23a0917cd3adc0e2e25c9879
           - name: kind
             value: task
         resolver: bundles
@@ -396,7 +396,7 @@ spec:
           - name: name
             value: build-image-index
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.3@sha256:0b4251ea0fab38be2b1441bea2788220d4cf2963ffb854a0ed90992fbabbe122
+            value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.3@sha256:70c52e88e737340e7b58418fda38c13273aa7cdf587b825778e3560aca1d1133
           - name: kind
             value: task
         resolver: bundles
@@ -413,7 +413,7 @@ spec:
           - name: name
             value: source-build
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-source-build:0.3@sha256:06597547cedc6aed09989379657e9d8adac0a3d0e125025054cec23669c16447
+            value: quay.io/konflux-ci/tekton-catalog/task-source-build:0.3@sha256:e1e625218212c94f8426f0c6367390281d628a6d4a1e3adb2b18a9cf1b62a947
           - name: kind
             value: task
         resolver: bundles
@@ -612,7 +612,7 @@ spec:
           - name: name
             value: apply-tags
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.3@sha256:a291081de7fb27f832c6fc3c4b078acf7e6162ca4c085db38b118ca87e8b5b66
+            value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.3@sha256:3ab844157eccd68e95e4852adc06c3c4ea674edb7865a474b0a898227f2893d6
           - name: kind
             value: task
         resolver: bundles
@@ -633,7 +633,7 @@ spec:
           - name: name
             value: push-dockerfile
           - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-push-dockerfile:0.3@sha256:63b5704945accd668406746c95c314e21f861667dc083cff8194de4cc9085910
+            value: quay.io/konflux-ci/tekton-catalog/task-push-dockerfile:0.3@sha256:3246385ae19fcf5dd8f6c47c92f13ed585e985032b79f7f22a0b3549c9352252
           - name: kind
             value: task
         resolver: bundles
