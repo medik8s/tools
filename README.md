@@ -19,7 +19,7 @@ The repo layout is:
   - Includes a RHWA preset for RHWA repos with RPMs and external packages dependencies.
 - `renovate.json` for Mintmaker/Renovate configuration of automatic MR to update the shared Tekton Pipelines tasks
 - `helper_scripts` directory for cluster helper scripts used by QE and lab workflows:
-  - `deploy_iib.sh` — deploy a brew/IIB catalog via OLM v0 (CatalogSource) or v1 (ClusterCatalog), with optional IDMS
+  - `deploy_iib.sh` — deploy a brew/IIB CatalogSource (+ optional IDMS)
   - `install_rhwa_operators.sh` — install RHWA operators via classic OLM (optional IDMS generation)
   - `sync_clustercatalog_from_catalogsource.sh` — align OLMv1 `ClusterCatalog` with a `CatalogSource`
   - `lib/rhwa_utils.sh` — shared catalog helpers (sourced by the scripts above; not run directly)
