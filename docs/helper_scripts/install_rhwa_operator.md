@@ -26,7 +26,7 @@ Options:
   --catsrc-ns NS        CatalogSource namespace (default: openshift-marketplace)
   --namespace NS        Install operators into NS (default: openshift-workload-availability)
   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
-  --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
+  --approval Manual|Automatic  InstallPlan approval (default: Automatic)
   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
   --wait                Wait for all CSVs to succeed (default: true)

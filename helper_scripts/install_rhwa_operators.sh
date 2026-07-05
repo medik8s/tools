@@ -376,7 +376,7 @@ rhwa_create_idms_from_catsrc() {
 }
 
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^#   /  /' | sed 's/^# //'
+  sed -n '2,39p' "$0" | sed 's/^#   /  /' | sed 's/^# //'
   echo ""
   echo "  Defaults: channel=$CHANNEL, catsrc=$CATSRC, namespace=$NS, approval=$APPROVAL, nhc-plugin=enabled"
   echo "  --create-idms: wait for catalog READY, write <script-dir>/idms/imageDigestMirrorSet_<catsrc>.yaml, oc apply, then install"
@@ -508,19 +508,21 @@ for pkg in "${PACKAGES[@]}"; do
     oc patch subscription "$sub_name" -n "$NS" --type=merge -p "$_sub_patch"
   else
     echo "  Creating Subscription for $pkg (channel: $CHANNEL)"
-    oc apply -f - <<YAML
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: ${sub_name}
-  namespace: ${NS}
-spec:
-  channel: ${CHANNEL}
-  installPlanApproval: ${APPROVAL}
-  name: ${pkg}
-  source: ${CATSRC}
-  sourceNamespace: ${CATSRC_NS}
-YAML
+    _sub_json=$(jq -n \
+      --arg name "$sub_name" \
+      --arg ns "$NS" \
+      --arg channel "$CHANNEL" \
+      --arg approval "$APPROVAL" \
+      --arg pkg "$pkg" \
+      --arg catsrc "$CATSRC" \
+      --arg catsrcNs "$CATSRC_NS" \
+      '{
+        apiVersion: "operators.coreos.com/v1alpha1",
+        kind: "Subscription",
+        metadata: {name: $name, namespace: $ns},
+        spec: {channel: $channel, installPlanApproval: $approval, name: $pkg, source: $catsrc, sourceNamespace: $catsrcNs}
+      }')
+    echo "$_sub_json" | oc apply -f -
   fi
 done
 
@@ -539,7 +541,9 @@ if [[ "$WAIT" == "true" ]]; then
           break
         fi
         if [[ "$phase" == "Failed" ]]; then
-          echo -e "  ${RED}$pkg: $csv_name phase=Failed${NC}" >&2
+          echo -e "  ${RED}$pkg: $csv_name phase=Failed — will not recover without manual intervention${NC}" >&2
+          _rhwa_exit_code=1
+          exit 1
         fi
       fi
       if (( $(date +%s) - start_ts > timeout_s )); then
@@ -558,7 +562,15 @@ if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG
   echo ""
   echo -e "${YELLOW}Enabling NHC console plugin: $NHC_CONSOLE_PLUGIN_NAME${NC}"
   if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null 2>&1; then
-    echo "  ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found yet (NHC operator may still be deploying it)."
+    echo "  Waiting for ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME (up to ${NHC_CONSOLE_PLUGIN_WAIT}s)..."
+    _cp_deadline=$(( $(date +%s) + NHC_CONSOLE_PLUGIN_WAIT ))
+    while (( $(date +%s) < _cp_deadline )); do
+      oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null 2>&1 && break
+      sleep 5
+    done
+    if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null 2>&1; then
+      echo -e "  ${RED}ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found after ${NHC_CONSOLE_PLUGIN_WAIT}s — skipping plugin enable.${NC}" >&2
+    fi
   fi
   # spec.plugins lives on operator.openshift.io/v1 Console, not config.openshift.io
   if oc get console.operator.openshift.io cluster -o name &>/dev/null 2>&1; then
