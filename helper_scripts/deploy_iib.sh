@@ -29,13 +29,13 @@ Options:
   --convert-secret        Convert pull secret from registry.redhat.io to brew.registry.redhat.io
   --cleanup               Remove the CatalogSource and secret for this IIB
   --dry-run               Print commands without executing them
-  --secret <PATH>         Path to brew pull secret YAML (default: iib_deployment/secrets/brew-pull-secret.yaml)
+  --secret <PATH>         Path to brew pull secret YAML (default: helper_scripts/secrets/brew-pull-secret.yaml)
   --namespace <NS>        Target namespace (default: openshift-operators)
   -h, --help              Show this help
 
 Prerequisites:
   1. oc login to target cluster
-  2. Pull secret YAML at iib_deployment/secrets/brew-pull-secret.yaml
+  2. Pull secret YAML at helper_scripts/secrets/brew-pull-secret.yaml
      Get from: https://access.redhat.com/terms-based-registry/
      Create a service account and download the OpenShift secret YAML.
      If the secret targets registry.redhat.io, use --convert-secret to
