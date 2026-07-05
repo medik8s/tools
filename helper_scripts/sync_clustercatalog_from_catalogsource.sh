@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 ################################################################################
+# Legacy bridge: align OLMv1 ClusterCatalog with a classic OLM CatalogSource.
+#
+# For new IIB deployments, prefer deploy_iib.sh --olm v1 which creates
+# ClusterCatalog directly. This script remains for bridging pre-existing
+# CatalogSources to ClusterCatalog.
+#
 # Align OLMv1 ClusterCatalog with a classic OLM CatalogSource (same catalog image ref).
 #
 # Also merges CatalogSource pull secrets into the cluster global pull-secret so
