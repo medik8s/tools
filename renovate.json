@@ -13,5 +13,12 @@
             "shared-tekton-pipelines/**"
         ],
         "automerge": true
+    },
+    "dockerfile": {
+        "description": "Automerge Containerfile image updates",
+        "managerFilePatterns": [
+            "/(^|/)Containerfile.*$/"
+        ],
+        "automerge": true
     }
 }
