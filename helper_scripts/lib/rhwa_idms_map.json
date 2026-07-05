@@ -17,6 +17,10 @@
       "component": "node-healthcheck-operator",
       "artifact": "nhc-bundle"
     },
+    "node-healthcheck-must-gather-rhel9": {
+      "component": "node-healthcheck-operator",
+      "artifact": "nhc-must-gather"
+    },
     "node-remediation-console-rhel9": {
       "component": "node-healthcheck-operator",
       "artifact": "nhc-console"
@@ -44,6 +48,18 @@
     "self-node-remediation-operator-bundle": {
       "component": "self-node-remediation",
       "artifact": "snr-bundle"
+    },
+    "storage-based-remediation-agent-rhel9": {
+      "component": "storage-based-remediation",
+      "artifact": "sbr-agent"
+    },
+    "storage-based-remediation-rhel9-operator": {
+      "component": "storage-based-remediation",
+      "artifact": "sbr-operator"
+    },
+    "storage-based-remediation-operator-bundle": {
+      "component": "storage-based-remediation",
+      "artifact": "sbr-bundle"
     }
   }
 }

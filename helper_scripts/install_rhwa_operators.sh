@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ################################################################################
-# Install all 5 RHWA operators: NHC, SNR, NMO, MDR, FAR.
+# Install all 6 RHWA operators: NHC, SNR, NMO, MDR, FAR, SBR.
 #
 # Options:
 #   --channel CHANNEL     Subscription channel (default: stable)
@@ -9,7 +9,7 @@
 #   --namespace NS        Install operators into NS (default: openshift-workload-availability)
 #   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
 #   --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
-#   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far). Default: all.
+#   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
 #   --wait                Wait for all CSVs to succeed (default: true)
 #   --kubeconfig-from HOST (optional) Download kubeconfig from remote host via SSH (user: root).
@@ -77,10 +77,11 @@ SNR_PKG="self-node-remediation"
 NMO_PKG="node-maintenance-operator"
 MDR_PKG="machine-deletion-remediation"
 FAR_PKG="fence-agents-remediation"
-ALL_PACKAGES=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG")
+SBR_PKG="storage-based-remediation"
+ALL_PACKAGES=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG" "$SBR_PKG")
 ONLY_LIST=""
 
-# Map short names (nhc,snr,nmo,mdr,far) to package name
+# Map short names (nhc,snr,nmo,mdr,far,sbr) to package name
 only_to_pkg() {
   case "$1" in
     nhc) echo "$NHC_PKG" ;;
@@ -88,6 +89,7 @@ only_to_pkg() {
     nmo) echo "$NMO_PKG" ;;
     mdr) echo "$MDR_PKG" ;;
     far) echo "$FAR_PKG" ;;
+    sbr) echo "$SBR_PKG" ;;
     *) echo "" ;;
   esac
 }
@@ -369,7 +371,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Build PACKAGES from --only (comma-separated: nhc,snr,nmo,mdr,far) or default all
+# Build PACKAGES from --only (comma-separated: nhc,snr,nmo,mdr,far,sbr) or default all
 if [[ -n "${ONLY_LIST:-}" ]]; then
   PACKAGES=()
   while IFS= read -r short; do
@@ -379,11 +381,11 @@ if [[ -n "${ONLY_LIST:-}" ]]; then
     if [[ -n "$pkg" ]]; then
       PACKAGES+=("$pkg")
     else
-      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far)${NC}" >&2
+      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far,sbr)${NC}" >&2
       exit 1
     fi
   done < <(echo "$ONLY_LIST" | tr ',' '\n')
-  [[ ${#PACKAGES[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far)${NC}" >&2 && exit 1
+  [[ ${#PACKAGES[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far,sbr)${NC}" >&2 && exit 1
 else
   PACKAGES=("${ALL_PACKAGES[@]}")
 fi
