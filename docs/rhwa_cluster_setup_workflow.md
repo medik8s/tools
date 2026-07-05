@@ -12,7 +12,7 @@ flowchart LR
 
 | Step | Script | When to use |
 |------|--------|-------------|
-| 1 | `iib_deployment/deploy_iib.sh` | Deploy a brew/IIB CatalogSource (+ optional IDMS). Skip if the catalog already exists. |
+| 1 | `helper_scripts/deploy_iib.sh` | Deploy a brew/IIB CatalogSource (+ optional IDMS). Skip if the catalog already exists. |
 | 2 | `helper_scripts/sync_clustercatalog_from_catalogsource.sh` | OLM v1 clusters: align `ClusterCatalog` with the CatalogSource and merge brew pull secrets. Skip on classic OLM-only clusters. |
 | 3 | `helper_scripts/install_rhwa_operators.sh` | Install all five RHWA operators via Subscriptions. Use `--create-idms` when testing disconnected/Konflux mirrors. |
 
@@ -22,7 +22,7 @@ Shared helpers live in `helper_scripts/lib/rhwa_utils.sh` (catalog wait, pull-se
 
 ```bash
 # 1. Deploy IIB catalog (optional if catalog already present)
-./iib_deployment/deploy_iib.sh 1141449 --convert-secret
+./helper_scripts/deploy_iib.sh 1141449 --convert-secret
 
 # 2. Sync OLM v1 ClusterCatalog (OLM v1 / operator-controller clusters)
 ./helper_scripts/sync_clustercatalog_from_catalogsource.sh \

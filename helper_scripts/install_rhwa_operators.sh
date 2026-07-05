@@ -92,59 +92,9 @@ only_to_pkg() {
   esac
 }
 
-# Embedded Konflux quay mirror map for --create-idms (no external file).
+# Konflux quay mirror map for --create-idms. Update lib/rhwa_idms_map.json when images change.
 rhwa_embedded_idms_map_json() {
-  cat <<'RHWA_IDMS_MAP_JSON_EOF'
-{
-  "quay_prefix": "quay.io/redhat-user-workloads/rhwa-tenant",
-  "images": {
-    "fence-agents-remediation-rhel9-operator": {
-      "component": "fence-agents-remediation",
-      "artifact": "far-operator"
-    },
-    "fence-agents-remediation-operator-bundle": {
-      "component": "fence-agents-remediation",
-      "artifact": "far-bundle"
-    },
-    "node-healthcheck-rhel9-operator": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-operator"
-    },
-    "node-healthcheck-operator-bundle": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-bundle"
-    },
-    "node-remediation-console-rhel9": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-console"
-    },
-    "machine-deletion-remediation-rhel9-operator": {
-      "component": "machine-deletion-remediation",
-      "artifact": "mdr-operator"
-    },
-    "machine-deletion-remediation-operator-bundle": {
-      "component": "machine-deletion-remediation",
-      "artifact": "mdr-bundle"
-    },
-    "node-maintenance-rhel9-operator": {
-      "component": "node-maintenance-operator",
-      "artifact": "nmo-operator"
-    },
-    "node-maintenance-operator-bundle": {
-      "component": "node-maintenance-operator",
-      "artifact": "nmo-bundle"
-    },
-    "self-node-remediation-rhel9-operator": {
-      "component": "self-node-remediation",
-      "artifact": "snr-operator"
-    },
-    "self-node-remediation-operator-bundle": {
-      "component": "self-node-remediation",
-      "artifact": "snr-bundle"
-    }
-  }
-}
-RHWA_IDMS_MAP_JSON_EOF
+  cat "${SCRIPT_DIR}/lib/rhwa_idms_map.json"
 }
 
 rhwa_idms_version_suffix() {
@@ -366,6 +316,7 @@ rhwa_create_idms_from_catsrc() {
     echo "apiVersion: config.openshift.io/v1"
     echo "kind: ImageDigestMirrorSet"
     echo "metadata:"
+    # Intentionally same name as deploy_iib.sh IDMS — --create-idms supersedes it with live catalog data
     echo "  name: rhwa-fbc-fips-image-mirror-set"
     echo "  labels:"
     echo "    rhwa.redhat.com/generated-from-catalog: \"${catsrc}\""
@@ -515,7 +466,7 @@ metadata:
 YAML
 fi
 
-# Subscriptions for all 5 operators (we use name: <package>-operator only)
+# Yields e.g. nhc-operator-operator for pkgs ending in -operator — cosmetic, not worth renaming (breaks existing clusters)
 for pkg in "${PACKAGES[@]}"; do
   sub_name="${pkg}-operator"
   if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then

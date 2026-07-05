@@ -1,0 +1,49 @@
+{
+  "quay_prefix": "quay.io/redhat-user-workloads/rhwa-tenant",
+  "images": {
+    "fence-agents-remediation-rhel9-operator": {
+      "component": "fence-agents-remediation",
+      "artifact": "far-operator"
+    },
+    "fence-agents-remediation-operator-bundle": {
+      "component": "fence-agents-remediation",
+      "artifact": "far-bundle"
+    },
+    "node-healthcheck-rhel9-operator": {
+      "component": "node-healthcheck-operator",
+      "artifact": "nhc-operator"
+    },
+    "node-healthcheck-operator-bundle": {
+      "component": "node-healthcheck-operator",
+      "artifact": "nhc-bundle"
+    },
+    "node-remediation-console-rhel9": {
+      "component": "node-healthcheck-operator",
+      "artifact": "nhc-console"
+    },
+    "machine-deletion-remediation-rhel9-operator": {
+      "component": "machine-deletion-remediation",
+      "artifact": "mdr-operator"
+    },
+    "machine-deletion-remediation-operator-bundle": {
+      "component": "machine-deletion-remediation",
+      "artifact": "mdr-bundle"
+    },
+    "node-maintenance-rhel9-operator": {
+      "component": "node-maintenance-operator",
+      "artifact": "nmo-operator"
+    },
+    "node-maintenance-operator-bundle": {
+      "component": "node-maintenance-operator",
+      "artifact": "nmo-bundle"
+    },
+    "self-node-remediation-rhel9-operator": {
+      "component": "self-node-remediation",
+      "artifact": "snr-operator"
+    },
+    "self-node-remediation-operator-bundle": {
+      "component": "self-node-remediation",
+      "artifact": "snr-bundle"
+    }
+  }
+}
