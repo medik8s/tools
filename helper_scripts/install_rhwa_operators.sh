@@ -8,7 +8,7 @@
 #   --catsrc-ns NS        CatalogSource namespace (default: openshift-marketplace)
 #   --namespace NS        Install operators into NS (default: openshift-workload-availability)
 #   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
-#   --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
+#   --approval Manual|Automatic  InstallPlan approval (default: Automatic)
 #   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
 #   --wait                Wait for all CSVs to succeed (default: true)
@@ -43,15 +43,45 @@ set -euo pipefail
 
 _kubeconfig_tmp=""
 _subs_tmp=""
+_rhwa_exit_code=0
 _rhwa_cleanup() {
+  _rhwa_remove_duplicate_subs || true
   rm -f "${_kubeconfig_tmp}" "${_subs_tmp}"
+  exit "$_rhwa_exit_code"
 }
 trap _rhwa_cleanup EXIT
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+_rhwa_remove_duplicate_subs() {
+  [[ -z "${NS:-}" || ${#ALL_PACKAGES[@]:-0} -eq 0 ]] && return 0
+  oc whoami &>/dev/null 2>&1 || return 0
+  echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
+  _subs_tmp=$(mktemp)
+  for _pass in 1 2; do
+    [[ $_pass -eq 2 ]] && sleep 3
+    oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_subs_tmp" || true
+    while read -r sub_meta_name spec_name; do
+      [[ -z "$sub_meta_name" ]] && continue
+      for pkg in "${ALL_PACKAGES[@]}"; do
+        if [[ "$spec_name" == "$pkg" ]]; then
+          canonical="${pkg}-operator"
+          if [[ "$sub_meta_name" != "$canonical" ]]; then
+            oc delete subscription "$sub_meta_name" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted duplicate subscription: $sub_meta_name" || true
+          fi
+          break
+        fi
+      done
+    done < "$_subs_tmp" 2>/dev/null || true
+  done
+}
+
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' NC=''
+fi
 
 NS=openshift-workload-availability
 CHANNEL=stable
@@ -362,6 +392,7 @@ while [[ $# -gt 0 ]]; do
     --only)         ONLY_LIST="$2"; shift 2 ;;
     --disable-nhc-plugin) ENABLE_NHC_PLUGIN=false; shift ;;
     --approval)     APPROVAL="$2"; shift 2 ;;
+    --wait)         WAIT=true; shift ;;
     --no-wait)      WAIT=false; shift ;;
     --create-idms)  CREATE_IDMS=true; shift ;;
     --kubeconfig-from) KUBECONFIG_FROM="$2"; shift 2 ;;
@@ -473,7 +504,8 @@ for pkg in "${PACKAGES[@]}"; do
   sub_name="${pkg}-operator"
   if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then
     echo "  Subscription $sub_name already exists, patching channel to $CHANNEL"
-    oc patch subscription "$sub_name" -n "$NS" --type=merge -p "{\"spec\":{\"channel\":\"${CHANNEL}\"}}"
+    _sub_patch=$(jq -n --arg ch "$CHANNEL" '{"spec":{"channel":$ch}}')
+    oc patch subscription "$sub_name" -n "$NS" --type=merge -p "$_sub_patch"
   else
     echo "  Creating Subscription for $pkg (channel: $CHANNEL)"
     oc apply -f - <<YAML
@@ -512,6 +544,7 @@ if [[ "$WAIT" == "true" ]]; then
       fi
       if (( $(date +%s) - start_ts > timeout_s )); then
         echo -e "${RED}Timeout waiting for $pkg CSV${NC}" >&2
+        _rhwa_exit_code=1
         exit 1
       fi
       sleep 5
@@ -529,14 +562,17 @@ if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG
   fi
   # spec.plugins lives on operator.openshift.io/v1 Console, not config.openshift.io
   if oc get console.operator.openshift.io cluster -o name &>/dev/null 2>&1; then
-    current=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins[*]}' 2>/dev/null || echo "")
-    if echo "$current" | tr ' ' '\n' | grep -q "^${NHC_CONSOLE_PLUGIN_NAME}$"; then
+    current_json=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null || echo "")
+    if echo "$current_json" | tr -d '[]" ' | tr ',' '\n' | grep -q "^${NHC_CONSOLE_PLUGIN_NAME}$"; then
       echo "  Plugin $NHC_CONSOLE_PLUGIN_NAME already enabled in Console."
     else
-      if oc patch console.operator.openshift.io cluster --type=json -p "[{\"op\":\"add\",\"path\":\"/spec/plugins/-\",\"value\":\"${NHC_CONSOLE_PLUGIN_NAME}\"}]" 2>/dev/null; then
+      new_plugins=$(echo "${current_json:-[]}" | jq --arg p "$NHC_CONSOLE_PLUGIN_NAME" \
+        'if type == "array" then . + [$p] | unique else [$p] end')
+      patch_json=$(jq -n --argjson plugins "$new_plugins" '{"spec":{"plugins":$plugins}}')
+      if oc patch console.operator.openshift.io cluster --type=merge -p "$patch_json" 2>/dev/null; then
         echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console."
       else
-        oc patch console.operator.openshift.io cluster --type=merge -p "{\"spec\":{\"plugins\":[\"${NHC_CONSOLE_PLUGIN_NAME}\"]}}" 2>/dev/null && echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console." || echo "  Could not patch Console (plugin may need to be enabled manually)."
+        echo "  Could not patch Console (plugin may need to be enabled manually)."
       fi
     fi
   else
@@ -544,29 +580,7 @@ if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG
   fi
 fi
 
-# Remove duplicate subscriptions for the same package. OLM can create the long-named one
-# (e.g. self-node-remediation-stable-redhat-operators-openshift-marketplace). Run twice
-# and use a temp file so we don't miss any (no subshell from pipe).
-echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
-_subs_tmp=$(mktemp)
-for _pass in 1 2; do
-  [[ $_pass -eq 2 ]] && sleep 3
-  oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_subs_tmp" || true
-  while read -r sub_meta_name spec_name; do
-    [[ -z "$sub_meta_name" ]] && continue
-    # Is this one of our packages?
-    found=""
-    for pkg in "${ALL_PACKAGES[@]}"; do
-      if [[ "$spec_name" == "$pkg" ]]; then
-        canonical="${pkg}-operator"
-        if [[ "$sub_meta_name" != "$canonical" ]]; then
-          oc delete subscription "$sub_meta_name" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted duplicate subscription: $sub_meta_name" || true
-        fi
-        break
-      fi
-    done
-  done < "$_subs_tmp" 2>/dev/null || true
-done
+_rhwa_remove_duplicate_subs
 
 echo ""
 echo -e "${GREEN}Done. Operators installed in namespace: $NS${NC}"

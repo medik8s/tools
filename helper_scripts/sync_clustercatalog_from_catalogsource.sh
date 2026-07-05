@@ -59,7 +59,10 @@ set_var_from_arg() {
     CATSRC_NS) CATSRC_NS="$value" ;;
     CLUSTERCATALOG_NAME) CLUSTERCATALOG_NAME="$value" ;;
     CLUSTERCATALOG_LABEL) CLUSTERCATALOG_LABEL="$value" ;;
-    CLUSTERCATALOG_PRIORITY) CLUSTERCATALOG_PRIORITY="$value" ;;
+    CLUSTERCATALOG_PRIORITY)
+      [[ "$value" =~ ^-?[0-9]+$ ]] || { echo "Error: $name must be an integer" >&2; exit 1; }
+      CLUSTERCATALOG_PRIORITY="$value"
+      ;;
     CATSRC_WAIT_TIMEOUT)
       [[ "$value" =~ ^[0-9]+$ ]] || { echo "Error: $name must be a positive integer" >&2; exit 1; }
       CATSRC_WAIT_TIMEOUT="$value"
