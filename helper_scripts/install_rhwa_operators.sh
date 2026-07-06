@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ################################################################################
-# Install all 5 RHWA operators: NHC, SNR, NMO, MDR, FAR.
+# Install all 6 RHWA operators: NHC, SNR, NMO, MDR, FAR, SBR.
 #
 # Options:
 #   --channel CHANNEL     Subscription channel (default: stable)
@@ -9,7 +9,7 @@
 #   --namespace NS        Install operators into NS (default: openshift-workload-availability)
 #   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
 #   --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
-#   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far). Default: all.
+#   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
 #   --wait                Wait for all CSVs to succeed (default: true)
 #   --kubeconfig-from HOST (optional) Download kubeconfig from remote host via SSH (user: root).
@@ -77,10 +77,11 @@ SNR_PKG="self-node-remediation"
 NMO_PKG="node-maintenance-operator"
 MDR_PKG="machine-deletion-remediation"
 FAR_PKG="fence-agents-remediation"
-ALL_PACKAGES=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG")
+SBR_PKG="storage-based-remediation"
+ALL_PACKAGES=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG" "$SBR_PKG")
 ONLY_LIST=""
 
-# Map short names (nhc,snr,nmo,mdr,far) to package name
+# Map short names (nhc,snr,nmo,mdr,far,sbr) to package name
 only_to_pkg() {
   case "$1" in
     nhc) echo "$NHC_PKG" ;;
@@ -88,63 +89,14 @@ only_to_pkg() {
     nmo) echo "$NMO_PKG" ;;
     mdr) echo "$MDR_PKG" ;;
     far) echo "$FAR_PKG" ;;
+    sbr) echo "$SBR_PKG" ;;
     *) echo "" ;;
   esac
 }
 
-# Embedded Konflux quay mirror map for --create-idms (no external file).
+# Konflux quay mirror map for --create-idms. Update lib/rhwa_idms_map.json when images change.
 rhwa_embedded_idms_map_json() {
-  cat <<'RHWA_IDMS_MAP_JSON_EOF'
-{
-  "quay_prefix": "quay.io/redhat-user-workloads/rhwa-tenant",
-  "images": {
-    "fence-agents-remediation-rhel9-operator": {
-      "component": "fence-agents-remediation",
-      "artifact": "far-operator"
-    },
-    "fence-agents-remediation-operator-bundle": {
-      "component": "fence-agents-remediation",
-      "artifact": "far-bundle"
-    },
-    "node-healthcheck-rhel9-operator": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-operator"
-    },
-    "node-healthcheck-operator-bundle": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-bundle"
-    },
-    "node-remediation-console-rhel9": {
-      "component": "node-healthcheck-operator",
-      "artifact": "nhc-console"
-    },
-    "machine-deletion-remediation-rhel9-operator": {
-      "component": "machine-deletion-remediation",
-      "artifact": "mdr-operator"
-    },
-    "machine-deletion-remediation-operator-bundle": {
-      "component": "machine-deletion-remediation",
-      "artifact": "mdr-bundle"
-    },
-    "node-maintenance-rhel9-operator": {
-      "component": "node-maintenance-operator",
-      "artifact": "nmo-operator"
-    },
-    "node-maintenance-operator-bundle": {
-      "component": "node-maintenance-operator",
-      "artifact": "nmo-bundle"
-    },
-    "self-node-remediation-rhel9-operator": {
-      "component": "self-node-remediation",
-      "artifact": "snr-operator"
-    },
-    "self-node-remediation-operator-bundle": {
-      "component": "self-node-remediation",
-      "artifact": "snr-bundle"
-    }
-  }
-}
-RHWA_IDMS_MAP_JSON_EOF
+  cat "${SCRIPT_DIR}/lib/rhwa_idms_map.json"
 }
 
 rhwa_idms_version_suffix() {
@@ -366,6 +318,7 @@ rhwa_create_idms_from_catsrc() {
     echo "apiVersion: config.openshift.io/v1"
     echo "kind: ImageDigestMirrorSet"
     echo "metadata:"
+    # Intentionally same name as deploy_iib.sh IDMS — --create-idms supersedes it with live catalog data
     echo "  name: rhwa-fbc-fips-image-mirror-set"
     echo "  labels:"
     echo "    rhwa.redhat.com/generated-from-catalog: \"${catsrc}\""
@@ -418,7 +371,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Build PACKAGES from --only (comma-separated: nhc,snr,nmo,mdr,far) or default all
+# Build PACKAGES from --only (comma-separated: nhc,snr,nmo,mdr,far,sbr) or default all
 if [[ -n "${ONLY_LIST:-}" ]]; then
   PACKAGES=()
   while IFS= read -r short; do
@@ -428,11 +381,11 @@ if [[ -n "${ONLY_LIST:-}" ]]; then
     if [[ -n "$pkg" ]]; then
       PACKAGES+=("$pkg")
     else
-      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far)${NC}" >&2
+      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far,sbr)${NC}" >&2
       exit 1
     fi
   done < <(echo "$ONLY_LIST" | tr ',' '\n')
-  [[ ${#PACKAGES[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far)${NC}" >&2 && exit 1
+  [[ ${#PACKAGES[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far,sbr)${NC}" >&2 && exit 1
 else
   PACKAGES=("${ALL_PACKAGES[@]}")
 fi
@@ -515,7 +468,7 @@ metadata:
 YAML
 fi
 
-# Subscriptions for all 5 operators (we use name: <package>-operator only)
+# Yields e.g. nhc-operator-operator for pkgs ending in -operator — cosmetic, not worth renaming (breaks existing clusters)
 for pkg in "${PACKAGES[@]}"; do
   sub_name="${pkg}-operator"
   if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then

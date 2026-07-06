@@ -8,7 +8,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 
 1. Clone the repo or copy the full `helper_scripts/` directory (includes `lib/rhwa_utils.sh`, which this script sources).
 2. `oc login` to the target cluster.
-3. Ensure the source `CatalogSource` exists (e.g. from `iib_deployment/deploy_iib.sh` or a Konflux brew catalog).
+3. Ensure the source `CatalogSource` exists (e.g. from `helper_scripts/deploy_iib.sh` or a Konflux brew catalog).
 4. Run the script (patch existing ClusterCatalog or create a new one).
 
 ### Usage

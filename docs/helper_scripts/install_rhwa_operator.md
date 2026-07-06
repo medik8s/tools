@@ -18,7 +18,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 ```
 $ ./helper_scripts/install_rhwa_operators.sh --help
 ################################################################################
-Install all 5 RHWA operators: NHC, SNR, NMO, MDR, FAR.
+Install all 6 RHWA operators: NHC, SNR, NMO, MDR, FAR, SBR.
 
 Options:
   --channel CHANNEL     Subscription channel (default: stable)
@@ -27,7 +27,7 @@ Options:
   --namespace NS        Install operators into NS (default: openshift-workload-availability)
   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
   --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
-  --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far). Default: all.
+  --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
   --wait                Wait for all CSVs to succeed (default: true)
   --kubeconfig-from HOST (optional) Download kubeconfig from remote host via SSH (user: root).
