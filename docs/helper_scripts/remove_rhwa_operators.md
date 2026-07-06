@@ -31,7 +31,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 1. Subscriptions and CSVs for selected operators (all namespaces)
 2. OLM v1 ClusterExtensions (if present)
 3. Stale OLM v0 ClusterRoles (`*-metrics-reader`, `*-ext-remediation`) that block OLM v1 installs
-4. OperatorGroup `workload-availability-operator-group`
+4. OperatorGroup `workload-availability-operator-group` (only when removing all five operators; skipped with `--only`)
 5. Custom resources and CRDs for selected operators
 
 The `openshift-workload-availability` namespace is left in place for reinstall. Delete it manually if desired.

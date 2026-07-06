@@ -175,10 +175,9 @@ while read -r ns name pkg; do
   [[ -z "$pkg" ]] && continue
   for OP in "${OPERATORS[@]}"; do
     if [[ "$pkg" == "$OP" ]]; then
-      if oc delete subscription "$name" -n "$ns" --ignore-not-found --timeout=45s 2>/dev/null; then
+      if err=$(oc delete subscription "$name" -n "$ns" --ignore-not-found --timeout=45s 2>&1); then
         echo "  Deleted subscription $name in $ns"
       else
-        err=$(oc delete subscription "$name" -n "$ns" --ignore-not-found --timeout=45s 2>&1) || true
         echo -e "  ${RED}Failed to delete subscription $name in $ns: ${err}${NC}" >&2
       fi
       break
@@ -220,12 +219,12 @@ for OP in "${OPERATORS[@]}"; do
   en=$(rhwa_op_to_clusterextension "$OP")
   [[ -n "$en" ]] && ext_names+=("$en")
 done
-ext_list=$(oc get clusterextension -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null || true)
-while read -r ns ext_name; do
+ext_list=$(oc get clusterextension -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null || true)
+while read -r ext_name; do
   [[ -z "$ext_name" ]] && continue
   for en in "${ext_names[@]}"; do
     if [[ "$ext_name" == "$en" ]]; then
-      oc delete clusterextension "$ext_name" -n "$ns" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted clusterextension $ext_name in $ns" || true
+      oc delete clusterextension "$ext_name" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted clusterextension $ext_name" || true
       break
     fi
   done
@@ -236,9 +235,6 @@ for OP in "${OPERATORS[@]}"; do
   rhwa_add_stale_clusterroles_for_op "$OP"
 done
 
-echo -e "\n${YELLOW}Removing OperatorGroup in openshift-workload-availability (if present)...${NC}"
-oc delete operatorgroup workload-availability-operator-group -n openshift-workload-availability --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted OperatorGroup workload-availability-operator-group" || true
-
 CRD_GROUPS=()
 for OP in "${OPERATORS[@]}"; do
   g=$(rhwa_op_to_crd_group "$OP")
@@ -246,14 +242,30 @@ for OP in "${OPERATORS[@]}"; do
 done
 
 echo -e "\n${YELLOW}Deleting RHWA custom resources in all namespaces...${NC}"
+# OperatorGroup is OLM v0 only — shared by all RHWA Subscriptions in this namespace.
+# Only delete when removing all operators to avoid breaking remaining OLM v0 installs.
+if [[ ${#OPERATORS[@]} -eq ${#ALL_OPERATORS[@]} ]]; then
+  echo -e "${YELLOW}Removing OperatorGroup in openshift-workload-availability (if present)...${NC}"
+  oc delete operatorgroup workload-availability-operator-group -n openshift-workload-availability --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted OperatorGroup workload-availability-operator-group" || true
+else
+  echo "  Skipping OperatorGroup deletion (partial removal via --only)."
+fi
+
 for group in "${CRD_GROUPS[@]}"; do
   crds=$(oc get crd -o jsonpath="{range .items[?(@.spec.group==\"$group\")]}{.metadata.name}{\"\n\"}{end}" 2>/dev/null || true)
   for crd in $crds; do
     [[ -z "$crd" ]] && continue
     short=$(echo "$crd" | cut -d. -f1)
-    names=$(oc get "$short" -A -o name 2>/dev/null || true)
-    if [[ -n "$names" ]]; then
-      echo "$names" | xargs -r oc delete --ignore-not-found --timeout=60s 2>/dev/null && echo "  Deleted all $short instances" || true
+    cr_rows=$(oc get "$short" -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null || true)
+    if [[ -n "$cr_rows" ]]; then
+      deleted=0
+      while read -r cr_ns cr_name; do
+        [[ -z "$cr_name" ]] && continue
+        if oc delete "$short" "$cr_name" -n "$cr_ns" --ignore-not-found --timeout=60s 2>/dev/null; then
+          deleted=$((deleted + 1))
+        fi
+      done <<< "$cr_rows"
+      [[ $deleted -gt 0 ]] && echo "  Deleted $deleted $short instance(s)"
     fi
   done
 done
