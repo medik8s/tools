@@ -44,16 +44,19 @@ set -euo pipefail
 
 _kubeconfig_tmp=""
 _rhwa_exit_code=0
+_rhwa_install_started=false
 _rhwa_cleanup() {
   local _trap_rc=$?
-  _rhwa_remove_duplicate_subs || true
+  [[ "$_rhwa_install_started" == "true" ]] && _rhwa_remove_duplicate_subs || true
   rm -f "${_kubeconfig_tmp}"
   exit $(( _rhwa_exit_code > 0 ? _rhwa_exit_code : _trap_rc ))
 }
 trap _rhwa_cleanup EXIT
 
 _rhwa_remove_duplicate_subs() {
-  [[ -z "${NS:-}" || ${#ALL_PACKAGES[@]:-0} -eq 0 ]] && return 0
+  [[ -z "${NS:-}" ]] && return 0
+  [[ -v ALL_PACKAGES ]] || return 0
+  [[ ${#ALL_PACKAGES[@]} -eq 0 ]] && return 0
   oc whoami &>/dev/null || return 0
   echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
   local _local_subs_tmp
@@ -461,6 +464,7 @@ if ! oc whoami &>/dev/null; then
   exit 1
 fi
 
+_rhwa_install_started=true
 echo -e "${GREEN}Installing RHWA operators: ${PACKAGES[*]}${NC}"
 echo "  channel: $CHANNEL, catalog: $CATSRC ($CATSRC_NS), namespace: $NS, approval: $APPROVAL"
 echo "  enable NHC console plugin: $ENABLE_NHC_PLUGIN"
