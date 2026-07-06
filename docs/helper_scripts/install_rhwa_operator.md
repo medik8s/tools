@@ -10,7 +10,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 - Clone the repo or copy the full `helper_scripts/` directory (includes `lib/rhwa_utils.sh`, which `install_rhwa_operators.sh` sources).
 - Tools on PATH:
   - `oc` — always required
-  - `jq` — only when using `--create-idms`
+  - `jq` — always required
   - `opm` — optional; needed for `--create-idms` when the same packages exist in multiple catalogs (multi-catalog clusters)
 
 ### Help output
@@ -30,6 +30,7 @@ Options:
   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
   --wait                Wait for all CSVs to succeed (default: true)
+  --no-wait             Skip waiting for CSVs
   --kubeconfig-from HOST (optional) Download kubeconfig from remote host via SSH (user: root).
                          Exports KUBECONFIG for this run.
   --kubeconfig-path PATH (optional) Remote path to kubeconfig when using --kubeconfig-from (default: /root/.kube/config).
