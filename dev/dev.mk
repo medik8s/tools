@@ -12,6 +12,20 @@ MEDIK8S_NAMESPACE ?= medik8s-system
 TOOLS_DIR ?= $(shell cd .. && pwd)/tools
 DEV_DIR := $(TOOLS_DIR)/dev
 
+# CONTAINER_TOOL for dev targets: auto-detect docker/podman.
+# Use override to ensure dev targets use the same tool as setup.sh,
+# regardless of what the operator's Makefile sets.
+# Must be defined before DEV_CLUSTER_TYPE which uses it for KIND_EXPERIMENTAL_PROVIDER.
+override CONTAINER_TOOL := $(shell \
+  if command -v docker >/dev/null 2>&1; then echo docker; \
+  elif command -v podman >/dev/null 2>&1; then echo podman; \
+  else echo ""; \
+  fi \
+)
+ifeq ($(CONTAINER_TOOL),)
+  $(error No container tool found. Please install docker or podman.)
+endif
+
 # Detect cluster type: "kind" if a Kind cluster exists, "external" otherwise.
 # Uses CONTAINER_TOOL to set KIND_EXPERIMENTAL_PROVIDER (needed for podman).
 # When SKIP_KIND=true, force external mode (the user explicitly opted out of Kind).
@@ -39,19 +53,6 @@ ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
 else
   DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell echo $$USER | head -c 8):$(TTL_SH_TTL)
-endif
-
-# CONTAINER_TOOL for dev targets: auto-detect docker/podman.
-# Use override to ensure dev targets use the same tool as setup.sh,
-# regardless of what the operator's Makefile sets.
-override CONTAINER_TOOL := $(shell \
-  if command -v docker >/dev/null 2>&1; then echo docker; \
-  elif command -v podman >/dev/null 2>&1; then echo podman; \
-  else echo ""; \
-  fi \
-)
-ifeq ($(CONTAINER_TOOL),)
-  $(error No container tool found. Please install docker or podman.)
 endif
 
 # Detect kubectl or oc
@@ -182,7 +183,7 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 		if [ -n "$$DEPLOY" ]; then \
 			echo "=== Waiting for operator deployment to be ready ==="; \
 			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
-				echo "Warning: deployment $$DEPLOY is not ready. Check logs with 'make dev-logs'."; \
+				{ echo "Error: deployment $$DEPLOY is not ready. Check logs with 'make dev-logs'."; exit 1; }; \
 		fi; \
 	else \
 		echo "  Warning: could not detect operator namespace. Skipping cert-manager setup."; \

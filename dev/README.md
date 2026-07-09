@@ -13,7 +13,8 @@ make dev-deploy         # Build and deploy operator
 make dev-describe       # Verify everything is running
 make dev-simulate-failure && kubectl get nodes -w  # Test remediation
 make dev-recover        # Restore cluster
-make dev-teardown       # Clean up
+make dev-undeploy       # Remove operator
+make dev-teardown       # Destroy Kind cluster (Kind only)
 ```
 
 ### Full Walkthrough (NHC + SNR)
@@ -54,8 +55,9 @@ make dev-shell                         # shell into a worker node
 # 7. Recover all workers
 make dev-recover
 
-# 8. Teardown
-make dev-teardown
+# 8. Clean up
+make dev-undeploy       # from each operator directory, removes the operator
+make dev-teardown       # destroys the Kind cluster (Kind only)
 ```
 
 ## Prerequisites
@@ -161,6 +163,28 @@ Re-running `make dev-setup` on an existing cluster is safe — it re-applies con
 | `make dev-simulate-storm` | Stop kubelet on 2/3 workers → NHC detects storm, pauses remediation |
 | `make dev-recover` | Restart kubelet, restore network, clean up CRs |
 
+### Kind vs OpenShift recovery
+
+On Kind, `dev-simulate-failure` stops kubelet via `docker exec`, which also kills the SNR agent pod on that node. Since a Kind container "reboot" doesn't restart kubelet, the automatic recovery can't complete — `dev-recover` simulates what a real reboot would do. The dev environment tests the detection/decision flow (NHC detects unhealthy node → creates SNR CR), not the full reboot cycle.
+
+On OpenShift, SNR automatically reboots the unhealthy node, kubelet restarts on boot, and the node rejoins — full self-healing, no manual `dev-recover` needed.
+
+**Kind** (detection flow only):
+```bash
+make dev-simulate-failure                # stop kubelet via docker exec
+kubectl get selfnoderemediation -A -w    # watch SNR CR get created
+make dev-recover                         # manually restart kubelet
+```
+
+**OpenShift** (full end-to-end):
+```bash
+make dev-simulate-failure                # prints oc debug command (safe by default)
+# Or auto-execute:
+DEV_FORCE_SIMULATE=true make dev-simulate-failure
+kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
+# No dev-recover needed — SNR reboots the node automatically
+```
+
 ## All Targets
 
 | Target | Description |
@@ -197,9 +221,11 @@ ephemeral registry that requires no auth.
 export KUBECONFIG=~/.kube/my-ocp-cluster
 export SKIP_KIND=true
 
-make dev-setup     # Configures namespaces + cert-manager (no Kind)
-make dev-deploy    # Builds image, pushes to ttl.sh, deploys
-make dev-describe  # Verify everything is running
+make dev-setup              # Configures namespaces + cert-manager (no Kind)
+make dev-deploy             # Builds image, pushes to ttl.sh, deploys
+make dev-describe           # Verify everything is running
+make dev-simulate-failure   # Prints oc debug command (safe by default)
+make dev-undeploy           # Remove operator from cluster
 ```
 
 Exporting `SKIP_KIND=true` ensures all targets know this is an external cluster.
@@ -212,9 +238,9 @@ You can also use ttl.sh with a Kind cluster:
 DEV_REGISTRY=ttl.sh make dev-deploy
 ```
 
-**Note:** Failure simulations (`dev-simulate-failure`, etc.) require
-`docker exec`/`podman exec` access to Kind node containers. On external
-clusters, trigger failures through your cluster's own mechanisms.
+**Note:** On external clusters, `dev-simulate-failure` prints the `oc debug` / SSH
+commands to run instead of executing them directly (safety first). Set
+`DEV_FORCE_SIMULATE=true` to auto-execute via `oc debug`.
 
 ## Configuration
 
@@ -229,6 +255,7 @@ clusters, trigger failures through your cluster's own mechanisms.
 | `CONTAINER_TOOL` | auto-detected | `docker` or `podman` |
 | `KUBECTL` | auto-detected | `kubectl` or `oc` |
 | `NHC_UNHEALTHY_DURATION` | `300s` | Unhealthy condition duration for NHC CR |
+| `DEV_FORCE_SIMULATE` | `false` | Set to `true` to auto-execute failure simulation on external clusters (via `oc debug`) |
 
 ## Operator Coverage
 

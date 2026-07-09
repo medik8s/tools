@@ -103,7 +103,10 @@ else
     export KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}"
 
     # Check inotify limits — Kind nodes inherit host limits and operators need many watchers.
-    if [ "${SKIP_INOTIFY_CHECK}" = true ]; then
+    # Skip on non-Linux (e.g. macOS) where /proc/sys/fs/inotify does not exist.
+    if [ "$(uname -s)" != "Linux" ]; then
+        echo "  Skipping inotify check (non-Linux host)."
+    elif [ "${SKIP_INOTIFY_CHECK}" = true ]; then
         echo "Warning: inotify limits check skipped (--skip-inotify-check). Nodes may fail to start if limits are too low."
     else
         INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)

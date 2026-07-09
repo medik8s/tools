@@ -47,6 +47,116 @@ if [ ${#WORKERS[@]} -lt 2 ]; then
     exit 1
 fi
 
+# Detect external cluster: if we can't access the first worker as a container,
+# this is an external cluster (OCP, etc.) — print commands instead of executing.
+EXTERNAL_CLUSTER=false
+if ! ${CONTAINER_TOOL} container inspect "${WORKERS[0]}" &>/dev/null; then
+    EXTERNAL_CLUSTER=true
+fi
+
+# For external clusters, print commands by default. Set DEV_FORCE_SIMULATE=true
+# to execute them automatically via oc debug.
+if [ "${EXTERNAL_CLUSTER}" = true ]; then
+    # Check for oc (needed for oc debug on external clusters)
+    OC_CMD=""
+    if command -v oc &>/dev/null; then
+        OC_CMD="oc"
+    fi
+
+    case "$SCENARIO" in
+        kubelet-stop)
+            TARGET="${WORKERS[0]}"
+            if [ "${DEV_FORCE_SIMULATE:-false}" = true ] && [ -n "${OC_CMD}" ]; then
+                echo "=== Stopping kubelet on ${TARGET} via oc debug ==="
+                ${OC_CMD} debug "node/${TARGET}" -- chroot /host systemctl stop kubelet
+                echo ""
+                echo "Kubelet stopped on ${TARGET}. Node should go NotReady within ~40s."
+            else
+                echo "=== External cluster detected ==="
+                echo ""
+                echo "To stop kubelet on a worker, run one of:"
+                echo ""
+                if [ -n "${OC_CMD}" ]; then
+                    echo "  oc debug node/${TARGET} -- chroot /host systemctl stop kubelet"
+                fi
+                echo "  ssh ${TARGET} \"sudo systemctl stop kubelet\""
+                echo ""
+                echo "Or to let this script do it automatically:"
+                echo "  DEV_FORCE_SIMULATE=true make dev-simulate-failure"
+            fi
+            echo ""
+            echo "Monitor with:"
+            echo "  ${KUBECTL} get nodes -w"
+            echo "  ${KUBECTL} get nodehealthcheck -o yaml"
+            ${KUBECTL} get crd selfnoderemediations.self-node-remediation.medik8s.io &>/dev/null && \
+                echo "  ${KUBECTL} get selfnoderemediation -A -w"
+            ${KUBECTL} get crd fenceagentsremediations.fence-agents-remediation.medik8s.io &>/dev/null && \
+                echo "  ${KUBECTL} get fenceagentsremediation -A -w"
+            ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.medik8s.io &>/dev/null && \
+                echo "  ${KUBECTL} get machinedeletionremediation -A -w"
+            echo ""
+            echo "On OpenShift, SNR will automatically reboot the node — no manual recovery needed."
+            ;;
+
+        network-partition)
+            TARGET="${WORKERS[0]}"
+            echo "=== External cluster detected ==="
+            echo ""
+            echo "To block API server access from a worker, run:"
+            echo "  ssh ${TARGET} \"sudo iptables -A OUTPUT -p tcp --dport 6443 -j DROP\""
+            echo ""
+            echo "To restore:"
+            echo "  ssh ${TARGET} \"sudo iptables -D OUTPUT -p tcp --dport 6443 -j DROP\""
+            ;;
+
+        storm)
+            echo "=== External cluster detected ==="
+            echo ""
+            echo "To simulate a storm (stop kubelet on 2 workers), run:"
+            echo ""
+            if [ -n "${OC_CMD}" ]; then
+                echo "  oc debug node/${WORKERS[0]} -- chroot /host systemctl stop kubelet &"
+                echo "  oc debug node/${WORKERS[1]} -- chroot /host systemctl stop kubelet &"
+                echo "  wait"
+            else
+                echo "  ssh ${WORKERS[0]} \"sudo systemctl stop kubelet\" &"
+                echo "  ssh ${WORKERS[1]} \"sudo systemctl stop kubelet\" &"
+                echo "  wait"
+            fi
+            echo ""
+            echo "Or to let this script do it automatically:"
+            echo "  DEV_FORCE_SIMULATE=true make dev-simulate-storm"
+            ;;
+
+        recover)
+            echo "=== External cluster: recovery instructions ==="
+            echo ""
+            echo "On OpenShift with SNR, the node should reboot and recover automatically."
+            echo ""
+            echo "To manually restart kubelet on all workers:"
+            for node in "${WORKERS[@]}"; do
+                if [ -n "${OC_CMD}" ]; then
+                    echo "  oc debug node/${node} -- chroot /host systemctl start kubelet"
+                else
+                    echo "  ssh ${node} \"sudo systemctl start kubelet\""
+                fi
+            done
+            echo ""
+            echo "Then wait for nodes:"
+            echo "  ${KUBECTL} wait --for=condition=Ready node --all --timeout=120s"
+            ;;
+
+        *)
+            echo "Unknown scenario: ${SCENARIO}"
+            echo "Run '$0' without arguments for usage."
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
+# --- Kind cluster path (direct container access) ---
+
 # Verify we can access the containers. If the cluster was created with sudo,
 # the containers are owned by root and we need to run this script with sudo too.
 if ! ${CONTAINER_TOOL} container inspect "${WORKERS[0]}" &>/dev/null; then

@@ -14,7 +14,7 @@ echo "========================================"
 echo ""
 
 echo "--- Nodes ---"
-${KUBECTL} get nodes -o custom-columns=NAME:.metadata.name,STATUS:.status.conditions[-1:].type,READY:.status.conditions[-1:].status 2>/dev/null
+${KUBECTL} get nodes -o wide 2>/dev/null
 echo ""
 
 echo "--- NHC Status ---"
