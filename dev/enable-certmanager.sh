@@ -83,30 +83,33 @@ for wh_type in mutatingwebhookconfigurations validatingwebhookconfigurations; do
 done
 
 # Patch deployment to mount the TLS secret at the path controller-runtime expects
-echo "  Patching deployment to mount webhook TLS secret..."
-${KUBECTL} patch deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --type=strategic -p='{
-  "spec": {
-    "template": {
+if ${KUBECTL} get deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.volumes[*].name}' 2>/dev/null | grep -q cert; then
+    echo "  Deployment already has TLS volume mount — skipping patch."
+else
+    echo "  Patching deployment to mount webhook TLS secret..."
+    ${KUBECTL} patch deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --type=strategic -p='{
       "spec": {
-        "volumes": [{
-          "name": "cert",
-          "secret": {
-            "secretName": "webhook-server-cert",
-            "defaultMode": 420
+        "template": {
+          "spec": {
+            "volumes": [{
+              "name": "cert",
+              "secret": {
+                "secretName": "webhook-server-cert",
+                "defaultMode": 420
+              }
+            }],
+            "containers": [{
+              "name": "manager",
+              "volumeMounts": [{
+                "name": "cert",
+                "mountPath": "/tmp/k8s-webhook-server/serving-certs",
+                "readOnly": true
+              }]
+            }]
           }
-        }],
-        "containers": [{
-          "name": "manager",
-          "volumeMounts": [{
-            "name": "cert",
-            "mountPath": "/tmp/k8s-webhook-server/serving-certs",
-            "readOnly": true
-          }]
-        }]
+        }
       }
-    }
-  }
-}'
-
-echo "  Waiting for rollout..."
-${KUBECTL} rollout status deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --timeout=120s
+    }'
+    echo "  Waiting for rollout..."
+    ${KUBECTL} rollout status deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --timeout=120s
+fi

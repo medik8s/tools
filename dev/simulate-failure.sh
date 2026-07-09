@@ -78,8 +78,14 @@ case "$SCENARIO" in
         echo ""
         echo "Monitor with:"
         echo "  ${KUBECTL} get nodes -w"
-        echo "  ${KUBECTL} get selfnoderemediation -A -w"
         echo "  ${KUBECTL} get nodehealthcheck -o yaml"
+        # Show monitor hints for whichever remediator CRDs are installed
+        ${KUBECTL} get crd selfnoderemediations.self-node-remediation.medik8s.io &>/dev/null && \
+            echo "  ${KUBECTL} get selfnoderemediation -A -w"
+        ${KUBECTL} get crd fenceagentsremediations.fence-agents-remediation.medik8s.io &>/dev/null && \
+            echo "  ${KUBECTL} get fenceagentsremediation -A -w"
+        ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.medik8s.io &>/dev/null && \
+            echo "  ${KUBECTL} get machinedeletionremediation -A -w"
         echo ""
         echo "To recover: ${SUDO_HINT}$0 recover"
         ;;
@@ -143,13 +149,18 @@ case "$SCENARIO" in
             echo "Some nodes may take longer to recover. Check with: kubectl get nodes"
         }
         echo ""
-        echo "Waiting for SNR controller to finish remediation cleanup..."
-        # The SNR controller needs to observe the node is healthy, remove taints,
-        # and strip its finalizer before the CR can be deleted. Give it time.
-        REMAINING=0
+        echo "Waiting for remediation controllers to finish cleanup..."
+        # Controllers need to observe the node is healthy, remove taints,
+        # and strip finalizers before CRs can be deleted. Give them time.
         WAITED=0
         while [ $WAITED -lt 120 ]; do
-            REMAINING=$(${KUBECTL} get selfnoderemediation -A --no-headers 2>/dev/null | wc -l)
+            REMAINING=0
+            ${KUBECTL} get crd selfnoderemediations.self-node-remediation.medik8s.io &>/dev/null && \
+                REMAINING=$((REMAINING + $(${KUBECTL} get selfnoderemediation -A --no-headers 2>/dev/null | wc -l)))
+            ${KUBECTL} get crd fenceagentsremediations.fence-agents-remediation.medik8s.io &>/dev/null && \
+                REMAINING=$((REMAINING + $(${KUBECTL} get fenceagentsremediation -A --no-headers 2>/dev/null | wc -l)))
+            ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.medik8s.io &>/dev/null && \
+                REMAINING=$((REMAINING + $(${KUBECTL} get machinedeletionremediation -A --no-headers 2>/dev/null | wc -l)))
             if [ "$REMAINING" -eq 0 ]; then
                 break
             fi
@@ -157,11 +168,9 @@ case "$SCENARIO" in
             sleep 5
             WAITED=$((WAITED + 5))
         done
-        # Clean up any stragglers (e.g. from other remediators)
-        ${KUBECTL} delete fenceagentsremediation --all -A 2>/dev/null || true
         if [ "$REMAINING" -gt 0 ]; then
-            echo "  Warning: $REMAINING SNR CR(s) still have finalizers after 120s."
-            echo "  You may need to wait longer or check SNR controller logs."
+            echo "  Warning: $REMAINING remediation CR(s) still have finalizers after 120s."
+            echo "  You may need to wait longer or check controller logs."
         fi
         echo "Done."
         ;;

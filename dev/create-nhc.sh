@@ -1,6 +1,7 @@
 #!/bin/bash
-# Creates a NodeHealthCheck CR that references SNR for remediation.
-# Usage: create-nhc.sh
+# Creates a NodeHealthCheck CR that references an available remediator.
+# Auto-detects deployed remediator templates (SNR, FAR, MDR) and uses the first found.
+# Usage: create-nhc.sh [--duration <seconds>]
 
 set -euo pipefail
 
@@ -8,22 +9,73 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+# Configurable unhealthy condition duration (default: 300s, matching downstream docs)
+NHC_UNHEALTHY_DURATION="${NHC_UNHEALTHY_DURATION:-300s}"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --duration)
+            NHC_UNHEALTHY_DURATION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Usage: $0 [--duration <duration>]"
+            echo "  --duration   Unhealthy condition duration (default: 300s)"
+            echo "  Environment: NHC_UNHEALTHY_DURATION=300s"
+            exit 1
+            ;;
+    esac
+done
+
 # Check if the NHC CRD exists
 if ! ${KUBECTL} get crd nodehealthchecks.remediation.medik8s.io &>/dev/null; then
     echo "Error: NodeHealthCheck CRD not found. Deploy NHC first (make dev-deploy from the NHC directory)."
     exit 1
 fi
 
-# Find the SNR template namespace
-SNR_NS=$(${KUBECTL} get selfnoderemediationtemplate -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | head -1)
-SNR_TEMPLATE=$(${KUBECTL} get selfnoderemediationtemplate -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+# Auto-detect available remediator template
+REMEDIATOR_API=""
+REMEDIATOR_KIND=""
+REMEDIATOR_NS=""
+REMEDIATOR_NAME=""
 
-if [ -z "${SNR_NS}" ] || [ -z "${SNR_TEMPLATE}" ]; then
-    echo "Error: No SelfNodeRemediationTemplate found. Deploy SNR first (make dev-deploy from the SNR directory)."
+# Try SNR first (most common)
+if ${KUBECTL} get crd selfnoderemediationtemplates.self-node-remediation.medik8s.io &>/dev/null; then
+    REMEDIATOR_NS=$(${KUBECTL} get selfnoderemediationtemplate -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | head -1)
+    REMEDIATOR_NAME=$(${KUBECTL} get selfnoderemediationtemplate -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+    if [ -n "${REMEDIATOR_NS}" ] && [ -n "${REMEDIATOR_NAME}" ]; then
+        REMEDIATOR_API="self-node-remediation.medik8s.io/v1alpha1"
+        REMEDIATOR_KIND="SelfNodeRemediationTemplate"
+    fi
+fi
+
+# Try FAR
+if [ -z "${REMEDIATOR_API}" ] && ${KUBECTL} get crd fenceagentsremediationtemplates.fence-agents-remediation.medik8s.io &>/dev/null; then
+    REMEDIATOR_NS=$(${KUBECTL} get fenceagentsremediationtemplate -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | head -1)
+    REMEDIATOR_NAME=$(${KUBECTL} get fenceagentsremediationtemplate -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+    if [ -n "${REMEDIATOR_NS}" ] && [ -n "${REMEDIATOR_NAME}" ]; then
+        REMEDIATOR_API="fence-agents-remediation.medik8s.io/v1alpha1"
+        REMEDIATOR_KIND="FenceAgentsRemediationTemplate"
+    fi
+fi
+
+# Try MDR
+if [ -z "${REMEDIATOR_API}" ] && ${KUBECTL} get crd machinedeletionremediationtemplates.machine-deletion-remediation.medik8s.io &>/dev/null; then
+    REMEDIATOR_NS=$(${KUBECTL} get machinedeletionremediationtemplate -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | head -1)
+    REMEDIATOR_NAME=$(${KUBECTL} get machinedeletionremediationtemplate -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+    if [ -n "${REMEDIATOR_NS}" ] && [ -n "${REMEDIATOR_NAME}" ]; then
+        REMEDIATOR_API="machine-deletion-remediation.medik8s.io/v1alpha1"
+        REMEDIATOR_KIND="MachineDeletionRemediationTemplate"
+    fi
+fi
+
+if [ -z "${REMEDIATOR_API}" ]; then
+    echo "Error: No remediator template found. Deploy a remediator first (SNR, FAR, or MDR)."
     exit 1
 fi
 
-echo "Creating NodeHealthCheck CR referencing ${SNR_TEMPLATE} in ${SNR_NS}..."
+echo "Creating NodeHealthCheck CR referencing ${REMEDIATOR_KIND} '${REMEDIATOR_NAME}' in ${REMEDIATOR_NS}..."
 
 ${KUBECTL} apply -f - <<EOF
 apiVersion: remediation.medik8s.io/v1alpha1
@@ -39,18 +91,19 @@ spec:
   unhealthyConditions:
     - type: Ready
       status: "False"
-      duration: 30s
+      duration: ${NHC_UNHEALTHY_DURATION}
     - type: Ready
       status: Unknown
-      duration: 30s
+      duration: ${NHC_UNHEALTHY_DURATION}
   remediationTemplate:
-    apiVersion: self-node-remediation.medik8s.io/v1alpha1
-    kind: SelfNodeRemediationTemplate
-    name: ${SNR_TEMPLATE}
-    namespace: ${SNR_NS}
+    apiVersion: ${REMEDIATOR_API}
+    kind: ${REMEDIATOR_KIND}
+    name: ${REMEDIATOR_NAME}
+    namespace: ${REMEDIATOR_NS}
 EOF
 
 echo "NodeHealthCheck 'nhc-worker-default' created."
 echo ""
-echo "  Watches workers for Ready=False/Unknown for 30s, then triggers SNR."
-echo "  Production uses 300s; 30s is for faster dev testing."
+echo "  Remediator: ${REMEDIATOR_KIND} (${REMEDIATOR_NAME})"
+echo "  Unhealthy duration: ${NHC_UNHEALTHY_DURATION}"
+echo "  Override with: NHC_UNHEALTHY_DURATION=30s make dev-create-nhc"

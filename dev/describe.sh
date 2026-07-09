@@ -18,9 +18,22 @@ ${KUBECTL} get nodes -o wide 2>/dev/null || true
 echo ""
 
 echo "--- Operator Pods ---"
-${KUBECTL} get pods -A -l control-plane=controller-manager \
-    -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase,RESTARTS:.status.containerStatuses[0].restartCount,AGE:.metadata.creationTimestamp \
-    2>/dev/null || echo "  (none)"
+PODS_FOUND=false
+for label in control-plane=controller-manager app.kubernetes.io/component=controller-manager; do
+    RESULT=$(${KUBECTL} get pods -A -l "$label" \
+        -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,NODE:.spec.nodeName,STATUS:.status.phase,RESTARTS:.status.containerStatuses[0].restartCount \
+        --no-headers 2>/dev/null)
+    if [ -n "$RESULT" ]; then
+        if [ "$PODS_FOUND" = false ]; then
+            echo "  NAMESPACE  NAME  NODE  STATUS  RESTARTS"
+        fi
+        echo "$RESULT" | while IFS= read -r line; do echo "  $line"; done
+        PODS_FOUND=true
+    fi
+done
+if [ "$PODS_FOUND" = false ]; then
+    echo "  (none)"
+fi
 echo ""
 
 # NodeHealthCheck
@@ -99,7 +112,26 @@ if ${KUBECTL} get namespace medik8s-leases >/dev/null 2>&1; then
     echo ""
 fi
 
-# Recent events
+# Leader election
+echo "--- Leader Election ---"
+LEADER_FOUND=false
+for label in control-plane=controller-manager app.kubernetes.io/component=controller-manager; do
+    for ns in $(${KUBECTL} get deployment -A -l "$label" --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do
+        for lease in $(${KUBECTL} get leases -n "$ns" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do
+            HOLDER=$(${KUBECTL} get lease "$lease" -n "$ns" -o jsonpath='{.spec.holderIdentity}' 2>/dev/null)
+            if [ -n "$HOLDER" ]; then
+                echo "  $ns/$lease → $HOLDER"
+                LEADER_FOUND=true
+            fi
+        done
+    done
+done
+if [ "$LEADER_FOUND" = false ]; then
+    echo "  (none)"
+fi
+echo ""
+
+# Recent events — includes both CR and node events
 echo "--- Recent Remediation Events ---"
 ${KUBECTL} get events -A --sort-by=.lastTimestamp 2>/dev/null \
     | grep -iE 'remediat|healthcheck|maintenance|fence|unhealthy|notready' \

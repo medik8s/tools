@@ -12,9 +12,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
+# Shared namespace for dev resources (PSA-privileged). Operators deploy into
+# their own namespaces (from kustomization.yaml), not this one.
 DEV_NS="${MEDIK8S_NAMESPACE:-medik8s-system}"
 INSTALL_OLM=true
 SKIP_KIND=false
+SKIP_INOTIFY_CHECK=false
+KIND_HA="${KIND_HA:-false}"
 KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
 
 # Parse arguments
@@ -28,17 +32,27 @@ while [[ $# -gt 0 ]]; do
             INSTALL_OLM=false
             shift
             ;;
+        --skip-inotify-check)
+            SKIP_INOTIFY_CHECK=true
+            shift
+            ;;
+        --ha)
+            KIND_HA=true
+            shift
+            ;;
         --name)
             CLUSTER_NAME="$2"
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--skip-kind] [--skip-olm] [--name <cluster-name>]"
+            echo "Usage: $0 [--skip-kind] [--skip-olm] [--skip-inotify-check] [--ha] [--name <cluster-name>]"
             echo ""
             echo "Options:"
-            echo "  --skip-kind   Skip Kind cluster creation (use existing cluster)"
-            echo "  --skip-olm    Skip OLM installation"
-            echo "  --name        Kind cluster name (default: medik8s-dev)"
+            echo "  --skip-kind           Skip Kind cluster creation (use existing cluster)"
+            echo "  --skip-olm            Skip OLM installation"
+            echo "  --skip-inotify-check  Skip inotify limits check"
+            echo "  --ha                  Use HA config (3 CP + 3 workers, for SNR CP testing)"
+            echo "  --name                Kind cluster name (default: medik8s-dev)"
             exit 0
             ;;
         *)
@@ -47,6 +61,10 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "${KIND_HA}" = true ]; then
+    KIND_CONFIG="${SCRIPT_DIR}/kind-config-ha.yaml"
+fi
 
 # Check prerequisites
 check_tool() {
@@ -70,34 +88,49 @@ if [ "${SKIP_KIND}" = true ]; then
 else
     check_tool kind "https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
     check_tool go "https://go.dev/doc/install"
+
+    # Kind >= 0.22.0 defaults to K8s 1.29+, required for cert-manager CRD features (selectableFields).
+    MIN_KIND_VERSION="0.22.0"
+    KIND_VERSION=$(kind version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -n "${KIND_VERSION}" ] && printf '%s\n%s\n' "${MIN_KIND_VERSION}" "${KIND_VERSION}" | sort -V -C; then
+        : # version is sufficient
+    else
+        echo "Error: Kind >= ${MIN_KIND_VERSION} is required (found: ${KIND_VERSION:-unknown})."
+        echo "Install from: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+        exit 1
+    fi
+
     export KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}"
 
     # Check inotify limits — Kind nodes inherit host limits and operators need many watchers.
-    INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
-    INOTIFY_WATCHES=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
-    if [ "${INOTIFY_INSTANCES}" -lt 512 ] || [ "${INOTIFY_WATCHES}" -lt 524288 ]; then
-        echo ""
-        echo "Warning: inotify limits are too low for running multiple operators in Kind."
-        echo "  Current:     max_user_instances=${INOTIFY_INSTANCES}, max_user_watches=${INOTIFY_WATCHES}"
-        echo "  Recommended: max_user_instances=8192, max_user_watches=524288"
-        echo ""
-        echo "Fix (requires sudo):"
-        echo "  sudo sysctl -w fs.inotify.max_user_instances=8192"
-        echo "  sudo sysctl -w fs.inotify.max_user_watches=524288"
-        echo ""
-        echo "To make persistent, add to /etc/sysctl.d/99-kind.conf:"
-        echo "  fs.inotify.max_user_instances=8192"
-        echo "  fs.inotify.max_user_watches=524288"
-        echo ""
-        # Try to fix automatically if running as root
-        if [ "$(id -u)" = "0" ]; then
-            echo "Running as root — fixing automatically."
-            sysctl -w fs.inotify.max_user_instances=8192 >/dev/null
-            sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
-        else
-            echo "Error: inotify limits are too low and must be fixed before continuing."
-            echo "Without sufficient inotify limits, Kind nodes may fail to join and operators will crash."
-            exit 1
+    if [ "${SKIP_INOTIFY_CHECK}" = true ]; then
+        echo "Warning: inotify limits check skipped (--skip-inotify-check). Nodes may fail to start if limits are too low."
+    else
+        INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
+        INOTIFY_WATCHES=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+        if [ "${INOTIFY_INSTANCES}" -lt 512 ] || [ "${INOTIFY_WATCHES}" -lt 524288 ]; then
+            echo ""
+            echo "Error: inotify limits are too low for running multiple operators in Kind."
+            echo "  Current:     max_user_instances=${INOTIFY_INSTANCES}, max_user_watches=${INOTIFY_WATCHES}"
+            echo "  Recommended: max_user_instances=8192, max_user_watches=524288"
+            echo ""
+            echo "Fix (requires sudo):"
+            echo "  sudo sysctl -w fs.inotify.max_user_instances=8192"
+            echo "  sudo sysctl -w fs.inotify.max_user_watches=524288"
+            echo ""
+            echo "To make persistent, add to /etc/sysctl.d/99-kind.conf:"
+            echo "  fs.inotify.max_user_instances=8192"
+            echo "  fs.inotify.max_user_watches=524288"
+            echo ""
+            # Try to fix automatically if running as root
+            if [ "$(id -u)" = "0" ]; then
+                echo "Running as root — fixing automatically."
+                sysctl -w fs.inotify.max_user_instances=8192 >/dev/null
+                sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
+            else
+                echo "To skip this check: $0 --skip-inotify-check"
+                exit 1
+            fi
         fi
     fi
 
@@ -173,7 +206,7 @@ else
         echo "  All worker nodes already labeled."
     fi
 
-    echo "=== Loading softdog kernel module on worker nodes (for SNR watchdog) ==="
+    echo "=== Loading softdog kernel module on worker nodes (for SNR/SBR watchdog) ==="
     NODES=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null)
     if [ -z "${NODES}" ]; then
         NODES=$(${KUBECTL} get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null)
@@ -182,7 +215,7 @@ else
         if echo "$node" | grep -q 'worker'; then
             ${CONTAINER_TOOL} exec "$node" modprobe softdog 2>/dev/null && \
                 echo "  softdog loaded on $node" || \
-                echo "  Warning: could not load softdog on $node (SNR watchdog reboot testing will be limited)"
+                echo "  Warning: could not load softdog on $node (SNR/SBR watchdog reboot testing will be limited)"
         fi
     done
 fi
@@ -232,7 +265,7 @@ echo "=== Medik8s dev environment ready ==="
 echo ""
 echo "  Cluster:   ${CLUSTER_NAME}"
 echo "  Namespace: ${DEV_NS}"
-echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l) (1 CP + 3 workers)"
+echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l) ($(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l) CP + $(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | wc -l) workers)"
 echo "  OLM:       $(${KUBECTL} get deployment -n olm olm-operator --no-headers >/dev/null 2>&1 && echo 'installed' || echo 'not installed')"
 echo ""
 echo "  Next steps:"

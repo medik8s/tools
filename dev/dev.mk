@@ -41,10 +41,10 @@ else
   DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell echo $$USER | head -c 8):$(TTL_SH_TTL)
 endif
 
-# CONTAINER_TOOL defines the container tool to be used for building images.
-# By default uses docker if available, falls back to podman.
-# You may also set CONTAINER_TOOL directly as an environment variable.
-CONTAINER_TOOL ?= $(shell \
+# CONTAINER_TOOL for dev targets: auto-detect docker/podman.
+# Use override to ensure dev targets use the same tool as setup.sh,
+# regardless of what the operator's Makefile sets.
+override CONTAINER_TOOL := $(shell \
   if command -v docker >/dev/null 2>&1; then echo docker; \
   elif command -v podman >/dev/null 2>&1; then echo podman; \
   else echo ""; \
@@ -79,9 +79,16 @@ export MEDIK8S_CLUSTER_NAME
 export MEDIK8S_NAMESPACE
 
 # Helper to find the namespace for this operator's deployment.
-# Looks for deployments with the controller-manager label, filtering by operator name.
+# First tries the kustomization namespace (works even when OPERATOR_NAME != namespace prefix,
+# e.g. SBR uses "sbr-operator-system" but OPERATOR_NAME is "storage-based-remediation").
+# Falls back to label-based cluster queries filtered by operator name.
 _dev_find_ns = $(shell \
+  NS=$$({ grep -rh '^namespace:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
+  if [ -n "$$NS" ] && $(KUBECTL) get namespace "$$NS" >/dev/null 2>&1; then echo "$$NS"; exit 0; fi; \
   NS=$$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | grep -i '$(OPERATOR_NAME)\|$(subst -,.,$(OPERATOR_NAME))' | head -1); \
+  if [ -z "$$NS" ]; then \
+    NS=$$($(KUBECTL) get deployment -A -l app.kubernetes.io/component=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | grep -i '$(OPERATOR_NAME)\|$(subst -,.,$(OPERATOR_NAME))' | head -1); \
+  fi; \
   if [ -z "$$NS" ]; then \
     NS=$$($(KUBECTL) get deployment -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null | grep '$(OPERATOR_NAME)' | awk '{print $$1}' | head -1); \
   fi; \
@@ -91,12 +98,8 @@ _dev_find_ns = $(shell \
 ##@ Dev Environment
 
 .PHONY: dev-setup
-dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters)
-ifeq ($(SKIP_KIND),true)
-	@$(DEV_DIR)/setup.sh --skip-kind
-else
-	@$(DEV_DIR)/setup.sh
-endif
+dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
+	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(KIND_HA)),--ha)
 
 .PHONY: dev-teardown
 dev-teardown: ## Destroy the Kind dev cluster
@@ -124,10 +127,10 @@ ifeq ($(DEV_REGISTRY),local)
 	done; \
 	restore() { for f in $$patched; do sed -i 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/' "$$f"; done; }; \
 	trap restore EXIT; \
-	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
-	$(CONTAINER_TOOL) save -o /tmp/dev-image-$(OPERATOR_NAME).tar $(DEV_IMG)
+	$(CONTAINER_TOOL) build -t $(DEV_IMG) . && \
+	$(CONTAINER_TOOL) save -o /tmp/dev-image-$(OPERATOR_NAME).tar $(DEV_IMG) && \
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
-		kind load image-archive /tmp/dev-image-$(OPERATOR_NAME).tar --name $(MEDIK8S_CLUSTER_NAME)
+		kind load image-archive /tmp/dev-image-$(OPERATOR_NAME).tar --name $(MEDIK8S_CLUSTER_NAME) && \
 	rm -f /tmp/dev-image-$(OPERATOR_NAME).tar
 else
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
@@ -139,41 +142,57 @@ endif
 
 .PHONY: dev-deploy
 dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, install CRDs, and deploy operator
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(DEV_IMG)
-	@# Use envsubst if the operator provides one (SNR uses ${IMG} in manifests)
-	@ENVSUBST_BIN="$(ENVSUBST)"; \
+	@# Backup kustomization.yaml, set dev image, build+apply, then restore (even on failure).
+	@cp config/manager/kustomization.yaml config/manager/kustomization.yaml.dev-bak; \
+	trap 'mv config/manager/kustomization.yaml.dev-bak config/manager/kustomization.yaml' EXIT; \
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(DEV_IMG) && cd ../.. && \
+	ENVSUBST_BIN="$(ENVSUBST)"; \
 	if [ -n "$$ENVSUBST_BIN" ] && [ -x "$$ENVSUBST_BIN" ]; then \
-		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
+		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
 	else \
-		$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -; \
+		$(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $(KUBECTL) apply -f -; \
 	fi
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	@# Detect the operator namespace from kustomization files (reliable, no cluster query needed).
 	@# The namespace may be in config/default/ or in a component/patch kustomization.yaml.
-	@NS=$$(grep -rh '^namespace:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null | head -1 | awk '{print $$2}'); \
+	@NS=$$({ grep -rh '^namespace:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
 	if [ -z "$$NS" ]; then \
 		NS=$$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | grep -i '$(OPERATOR_NAME)' | head -1); \
 	fi; \
 	if [ -n "$$NS" ]; then \
-		DEPLOY=$$($(KUBECTL) get deployment -n $$NS --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
-		SVC=$$($(KUBECTL) get svc -n $$NS --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep webhook | head -1); \
-		if [ -n "$$DEPLOY" ] && [ -n "$$SVC" ]; then \
-			$(DEV_DIR)/enable-certmanager.sh $$NS $$DEPLOY $$SVC; \
+		if [ -d config/webhook ]; then \
+			SVC_RAW=$$(grep -h '^  name:' config/webhook/service.yaml 2>/dev/null | head -1 | awk '{print $$2}'); \
+			PREFIX=$$({ grep -rh '^namePrefix:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
+			SVC="$${PREFIX}$${SVC_RAW}"; \
+			DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+			if [ -z "$$DEPLOY" ]; then \
+				DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l app.kubernetes.io/component=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+			fi; \
+			if [ -n "$$DEPLOY" ] && [ -n "$$SVC" ]; then \
+				$(DEV_DIR)/enable-certmanager.sh $$NS $$DEPLOY $$SVC; \
+			else \
+				echo "  Warning: config/webhook/ exists but could not determine deployment ($$DEPLOY) or service ($$SVC)."; \
+			fi; \
 		else \
-			echo "  Skipping cert-manager setup (no webhook service found)."; \
+			echo "  Skipping cert-manager setup (no config/webhook/ directory)."; \
 		fi; \
 		DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		if [ -z "$$DEPLOY" ]; then \
+			DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l app.kubernetes.io/component=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		fi; \
 		if [ -n "$$DEPLOY" ]; then \
 			echo "=== Waiting for operator deployment to be ready ==="; \
 			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
 				echo "Warning: deployment $$DEPLOY is not ready. Check logs with 'make dev-logs'."; \
 		fi; \
 	else \
-		echo "  Skipping cert-manager setup (deployment not found)."; \
+		echo "  Warning: could not detect operator namespace. Skipping cert-manager setup."; \
 	fi
-	@# Create NHC CR after webhooks are ready (cert-manager must be configured first)
+	@# Create NHC CR after webhooks are ready (cert-manager must be configured first).
+	@# Auto-detects any deployed remediator template (SNR, FAR, MDR).
 	@if $(KUBECTL) get crd nodehealthchecks.remediation.medik8s.io &>/dev/null && \
-	    $(KUBECTL) get selfnoderemediationtemplate -A --no-headers 2>/dev/null | grep -q .; then \
+	    ($(KUBECTL) get selfnoderemediationtemplate -A --no-headers 2>/dev/null | grep -q . || \
+	     $(KUBECTL) get fenceagentsremediationtemplate -A --no-headers 2>/dev/null | grep -q . || \
+	     $(KUBECTL) get machinedeletionremediationtemplate -A --no-headers 2>/dev/null | grep -q .); then \
 		$(DEV_DIR)/create-nhc.sh; \
 	fi
 
@@ -191,13 +210,33 @@ dev-undeploy: ## Remove operator from dev cluster
 		fi; \
 	fi
 
+.PHONY: dev-bundle-run
+dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk)
+	@if ! command -v operator-sdk >/dev/null 2>&1; then \
+		echo "Error: operator-sdk is required for bundle-run. Install from: https://sdk.operatorframework.io/docs/installation/"; \
+		exit 1; \
+	fi
+	$(MAKE) bundle bundle-build bundle-push bundle-run IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle
+
+.PHONY: dev-bundle-cleanup
+dev-bundle-cleanup: ## Remove OLM bundle deployment
+	@if ! command -v operator-sdk >/dev/null 2>&1; then \
+		echo "Error: operator-sdk is required for bundle-cleanup."; \
+		exit 1; \
+	fi
+	$(MAKE) bundle-cleanup BUNDLE_IMG=$(DEV_IMG)-bundle
+
 .PHONY: dev-redeploy
 dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
 	@NS="$(_dev_find_ns)"; \
 	if [ -n "$$NS" ]; then \
 		echo "Deleting operator pods in $$NS to pick up new image..."; \
 		$(KUBECTL) delete pods -n $$NS -l control-plane=controller-manager --force --grace-period=0 2>/dev/null || true; \
+		$(KUBECTL) delete pods -n $$NS -l app.kubernetes.io/component=controller-manager --force --grace-period=0 2>/dev/null || true; \
 		DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		if [ -z "$$DEPLOY" ]; then \
+			DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l app.kubernetes.io/component=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
+		fi; \
 		if [ -n "$$DEPLOY" ]; then \
 			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
 				echo "Warning: deployment is not ready. Check logs with 'make dev-logs'."; \
@@ -211,6 +250,9 @@ dev-logs: ## Tail operator controller-manager logs
 	@NS="$(_dev_find_ns)"; \
 	if [ -n "$$NS" ]; then \
 		POD=$$($(KUBECTL) get pods -n $$NS -l control-plane=controller-manager -o name 2>/dev/null | head -1); \
+		if [ -z "$$POD" ]; then \
+			POD=$$($(KUBECTL) get pods -n $$NS -l app.kubernetes.io/component=controller-manager -o name 2>/dev/null | head -1); \
+		fi; \
 		if [ -n "$$POD" ]; then \
 			$(KUBECTL) logs -f -n $$NS $$POD --all-containers --tail=50; \
 		else \
@@ -224,16 +266,19 @@ dev-logs: ## Tail operator controller-manager logs
 dev-wait: ## Wait for all medik8s operator pods to be ready
 	@echo "=== Waiting for operator deployments to be ready ==="
 	@FOUND=false; \
-	for ns in $$($(KUBECTL) get deployment -A -l control-plane=controller-manager --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
-		for deploy in $$($(KUBECTL) get deployment -n $$ns -l control-plane=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
-			FOUND=true; \
-			echo "  Waiting for $$ns/$$deploy..."; \
-			$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=120s || \
-				echo "  Warning: $$ns/$$deploy is not ready."; \
+	for label in control-plane=controller-manager app.kubernetes.io/component=controller-manager; do \
+		for ns in $$($(KUBECTL) get deployment -A -l $$label --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+			for deploy in $$($(KUBECTL) get deployment -n $$ns -l $$label --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
+				FOUND=true; \
+				echo "  Waiting for $$ns/$$deploy..."; \
+				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=120s || \
+					echo "  Warning: $$ns/$$deploy is not ready."; \
+			done; \
 		done; \
 	done; \
 	if [ "$$FOUND" = false ]; then \
 		echo "  No operator deployments found. Run 'make dev-deploy' first."; \
+		exit 1; \
 	fi
 
 .PHONY: dev-events
@@ -308,7 +353,9 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-deploy             Build + install CRDs + deploy operator"
 	@echo "  make dev-redeploy           Rebuild and restart (fast iteration)"
 	@echo "  make dev-undeploy           Remove operator from cluster"
-	@echo "  make dev-create-nhc         Create NodeHealthCheck CR (links NHC to SNR)"
+	@echo "  make dev-bundle-run         Deploy via OLM bundle (requires operator-sdk)"
+	@echo "  make dev-bundle-cleanup     Remove OLM bundle deployment"
+	@echo "  make dev-create-nhc         Create NodeHealthCheck CR (auto-detects remediator)"
 	@echo ""
 	@echo "Observe:"
 	@echo "  make dev-logs               Tail operator logs"
