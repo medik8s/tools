@@ -285,41 +285,28 @@ create_clustercatalog() {
     local image="brew.registry.redhat.io/rh-osbs/iib:${IIB_NR}"
     echo "Creating ClusterCatalog '${CATSRC_NAME}' with image ${image}..."
 
+    local manifest
+    manifest=$(jq -n \
+        --arg name "$CATSRC_NAME" \
+        --arg ref "$image" \
+        '{
+            apiVersion: "olm.operatorframework.io/v1",
+            kind: "ClusterCatalog",
+            metadata: {
+                name: $name,
+                labels: {"olm.operatorframework.io/metadata.name": $name}
+            },
+            spec: {
+                availabilityMode: "Available",
+                priority: -100,
+                source: {type: "Image", image: {ref: $ref, pollIntervalMinutes: 10}}
+            }
+        }')
     if [[ "${DRY_RUN}" == "true" ]]; then
-        jq -n \
-            --arg name "$CATSRC_NAME" \
-            --arg ref "$image" \
-            '{
-                apiVersion: "olm.operatorframework.io/v1",
-                kind: "ClusterCatalog",
-                metadata: {
-                    name: $name,
-                    labels: {"olm.operatorframework.io/metadata.name": $name}
-                },
-                spec: {
-                    availabilityMode: "Available",
-                    priority: -100,
-                    source: {type: "Image", image: {ref: $ref, pollIntervalMinutes: 10}}
-                }
-            }'
+        echo "$manifest"
         echo "[dry-run] oc apply -f - (ClusterCatalog ${CATSRC_NAME})"
     else
-        jq -n \
-            --arg name "$CATSRC_NAME" \
-            --arg ref "$image" \
-            '{
-                apiVersion: "olm.operatorframework.io/v1",
-                kind: "ClusterCatalog",
-                metadata: {
-                    name: $name,
-                    labels: {"olm.operatorframework.io/metadata.name": $name}
-                },
-                spec: {
-                    availabilityMode: "Available",
-                    priority: -100,
-                    source: {type: "Image", image: {ref: $ref, pollIntervalMinutes: 10}}
-                }
-            }' | oc apply -f -
+        echo "$manifest" | oc apply -f -
     fi
 }
 
@@ -336,6 +323,10 @@ merge_pull_secret_to_global() {
     trap 'rm -rf "${tmpdir:-}"' RETURN
 
     dockercfg_b64=$(grep -m1 '\.dockerconfigjson:' "${SECRET_PATH}" | awk '{print $2}')
+    if [[ -z "${dockercfg_b64}" ]]; then
+        echo "Error: .dockerconfigjson not found in ${SECRET_PATH}" >&2
+        return 1
+    fi
     echo "${dockercfg_b64}" | base64 --decode > "${tmpdir}/brew-secret.json"
 
     rhwa_merge_secret_file_into_global "${tmpdir}/brew-secret.json" "brew pull secret"
@@ -381,7 +372,7 @@ Verify with:
   oc describe clustercatalog ${CATSRC_NAME}${idms_note}
 
 Next: install operators with:
-  ./helper_scripts/install_rhwa_operators.sh --catsrc ${CATSRC_NAME}
+  ./helper_scripts/install_rhwa_operators.sh --olm v1 --catsrc ${CATSRC_NAME}
 MSG
 }
 
@@ -467,6 +458,7 @@ IIB_NR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --olm)
+            [[ $# -lt 2 ]] && { echo "Error: --olm requires a value (v0 or v1)" >&2; exit 1; }
             OLM_VERSION="$2"
             if [[ "$OLM_VERSION" != "v0" && "$OLM_VERSION" != "v1" ]]; then
                 echo "Error: --olm must be v0 or v1 (got: ${OLM_VERSION})" >&2
@@ -478,8 +470,8 @@ while [[ $# -gt 0 ]]; do
         --convert-secret)  CONVERT_SECRET=true; shift ;;
         --cleanup)         CLEANUP=true; shift ;;
         --dry-run)         DRY_RUN=true; shift ;;
-        --secret)          SECRET_PATH="$2"; shift 2 ;;
-        --namespace)       NAMESPACE="$2"; shift 2 ;;
+        --secret)          [[ $# -lt 2 ]] && { echo "Error: --secret requires a path" >&2; exit 1; }; SECRET_PATH="$2"; shift 2 ;;
+        --namespace)       [[ $# -lt 2 ]] && { echo "Error: --namespace requires a value" >&2; exit 1; }; NAMESPACE="$2"; shift 2 ;;
         -h|--help)         usage ;;
         -*)                echo "Unknown option: $1"; usage ;;
         *)

@@ -403,23 +403,24 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --olm)
+      [[ $# -lt 2 ]] && { echo -e "${RED}--olm requires a value (v0 or v1)${NC}" >&2; exit 1; }
       OLM_VERSION="$2"
       if [[ "$OLM_VERSION" != "v0" && "$OLM_VERSION" != "v1" ]]; then
         echo -e "${RED}--olm must be v0 or v1 (got: ${OLM_VERSION})${NC}" >&2; exit 1
       fi
       shift 2 ;;
-    --channel)      CHANNEL="$2"; shift 2 ;;
-    --catsrc)       CATSRC="$2"; shift 2 ;;
-    --catsrc-ns)    CATSRC_NS="$2"; shift 2 ;;
-    --namespace)    NS="$2"; shift 2 ;;
-    --only)         ONLY_LIST="$2"; shift 2 ;;
+    --channel)      [[ $# -lt 2 ]] && { echo -e "${RED}--channel requires a value${NC}" >&2; exit 1; }; CHANNEL="$2"; shift 2 ;;
+    --catsrc)       [[ $# -lt 2 ]] && { echo -e "${RED}--catsrc requires a value${NC}" >&2; exit 1; }; CATSRC="$2"; shift 2 ;;
+    --catsrc-ns)    [[ $# -lt 2 ]] && { echo -e "${RED}--catsrc-ns requires a value${NC}" >&2; exit 1; }; CATSRC_NS="$2"; shift 2 ;;
+    --namespace)    [[ $# -lt 2 ]] && { echo -e "${RED}--namespace requires a value${NC}" >&2; exit 1; }; NS="$2"; shift 2 ;;
+    --only)         [[ $# -lt 2 ]] && { echo -e "${RED}--only requires a value${NC}" >&2; exit 1; }; ONLY_LIST="$2"; shift 2 ;;
     --disable-nhc-plugin) ENABLE_NHC_PLUGIN=false; shift ;;
-    --approval)     APPROVAL="$2"; shift 2 ;;
+    --approval)     [[ $# -lt 2 ]] && { echo -e "${RED}--approval requires a value${NC}" >&2; exit 1; }; APPROVAL="$2"; shift 2 ;;
     --wait)         WAIT=true; shift ;;
     --no-wait)      WAIT=false; shift ;;
     --create-idms)  CREATE_IDMS=true; shift ;;
-    --kubeconfig-from) KUBECONFIG_FROM="$2"; shift 2 ;;
-    --kubeconfig-path) KUBECONFIG_REMOTE_PATH="$2"; shift 2 ;;
+    --kubeconfig-from) [[ $# -lt 2 ]] && { echo -e "${RED}--kubeconfig-from requires a value${NC}" >&2; exit 1; }; KUBECONFIG_FROM="$2"; shift 2 ;;
+    --kubeconfig-path) [[ $# -lt 2 ]] && { echo -e "${RED}--kubeconfig-path requires a value${NC}" >&2; exit 1; }; KUBECONFIG_REMOTE_PATH="$2"; shift 2 ;;
     -h|--help)      usage ;;
     *) echo -e "${RED}Unknown option: $1${NC}" >&2; usage ;;
   esac
@@ -600,8 +601,11 @@ if [[ "$OLM_VERSION" == "v1" ]]; then
             -o jsonpath='{range .status.conditions[?(@.type=="Installed")]}{.message}{end}' 2>/dev/null || true)
           fail_reason=$(oc get clusterextension "$ce_name" \
             -o jsonpath='{range .status.conditions[?(@.type=="Installed")]}{.reason}{end}' 2>/dev/null || true)
-          echo -e "  ${RED}${ce_name}: Installed=False: ${fail_msg}${NC}" >&2
-          if [[ "$fail_reason" == "ResolutionFailed" ]]; then
+          if [[ "$fail_msg" != "${_prev_fail_msg:-}" ]]; then
+            echo -e "  ${RED}${ce_name}: Installed=False (${fail_reason}): ${fail_msg}${NC}" >&2
+            _prev_fail_msg="$fail_msg"
+          fi
+          if [[ "$fail_reason" == "Failed" ]]; then
             echo -e "${RED}${ce_name}: terminal failure (${fail_reason}), not retrying${NC}" >&2
             exit 1
           fi
@@ -611,7 +615,10 @@ if [[ "$OLM_VERSION" == "v1" ]]; then
           oc describe clusterextension "$ce_name" 2>/dev/null | tail -20 >&2 || true
           exit 1
         fi
-        [[ -n "$prog_msg" ]] && echo "    Progressing: ${prog_msg}"
+        if [[ -n "$prog_msg" && "$prog_msg" != "${_prev_prog_msg:-}" ]]; then
+          echo "    Progressing: ${prog_msg}"
+          _prev_prog_msg="$prog_msg"
+        fi
         sleep 10
       done
     done
