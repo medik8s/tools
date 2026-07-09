@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy an IIB CatalogSource on an OpenShift cluster (e.g., Cluster Bot AWS).
+# Deploy an IIB catalog on an OpenShift cluster (e.g., Cluster Bot AWS).
+# Supports OLM v0 (CatalogSource) and OLM v1 (ClusterCatalog).
 # Run with -h for usage.
 
 NAMESPACE="openshift-operators"
@@ -14,23 +15,29 @@ CLEANUP=false
 APPLY_IDMS=true
 CONVERT_SECRET=false
 SECRET_PATH=""
+OLM_VERSION="v0"
+
+# shellcheck source=lib/rhwa_utils.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rhwa_utils.sh"
 
 usage() {
     cat <<'EOF'
 Usage: deploy_iib.sh <IIB_NUMBER> [OPTIONS]
 
-Deploy an IIB CatalogSource on an OpenShift cluster.
+Deploy an IIB catalog on an OpenShift cluster.
 
 Arguments:
   IIB_NUMBER              The IIB number (e.g., 1102943)
 
 Options:
+  --olm v0|v1             OLM version: v0 creates CatalogSource (default),
+                           v1 creates ClusterCatalog directly
   --no-idms               Skip applying IDMS (applied by default)
   --convert-secret        Convert pull secret from registry.redhat.io to brew.registry.redhat.io
-  --cleanup               Remove the CatalogSource and secret for this IIB
+  --cleanup               Remove the catalog and secret for this IIB
   --dry-run               Print commands without executing them
   --secret <PATH>         Path to brew pull secret YAML (default: helper_scripts/secrets/brew-pull-secret.yaml)
-  --namespace <NS>        Target namespace (default: openshift-operators)
+  --namespace <NS>        Target namespace for v0 CatalogSource (default: openshift-operators)
   -h, --help              Show this help
 
 Prerequisites:
@@ -42,10 +49,9 @@ Prerequisites:
      automatically convert it to brew.registry.redhat.io
   3. GITLAB_PRIVATE_TOKEN env var (for fetching IDMS from private rhwa-fbc repo, skip with --no-idms)
 
-Note: This script uses the OLM v0 CatalogSource API:
-  https://olm.operatorframework.io/docs/concepts/crds/catalogsource/
-  This will be replaced by ClusterCatalog in OLM v1:
-  https://operator-framework.github.io/operator-controller/tutorials/add-catalog/
+OLM v0 (default): creates CatalogSource + namespace pull secret + SA patch
+OLM v1 (--olm v1): creates ClusterCatalog + merges pull secret into global pull-secret
+  See: https://operator-framework.github.io/operator-controller/tutorials/add-catalog/
 EOF
     exit 0
 }
@@ -100,10 +106,25 @@ Or skip IDMS with --no-idms
 ERRMSG
         exit 1
     fi
+
+    if [[ "${OLM_VERSION}" == "v1" ]]; then
+        command -v jq >/dev/null || {
+            echo "Error: jq required for OLM v1 ClusterCatalog creation"
+            exit 1
+        }
+        if [[ "${DRY_RUN}" == "false" ]]; then
+            if ! oc api-resources --api-group=olm.operatorframework.io 2>/dev/null | grep -q ClusterCatalog; then
+                echo "Error: OLM v1 CRDs not found on this cluster (ClusterCatalog). OLM v1 requires OCP >= 4.18." >&2
+                exit 1
+            fi
+        fi
+    fi
 }
 
-cleanup() {
-    echo "Cleaning up IIB ${IIB_NR}..."
+# --- OLM v0 functions ---
+
+cleanup_v0() {
+    echo "Cleaning up IIB ${IIB_NR} (OLM v0)..."
 
     if [[ "${DRY_RUN}" == "false" ]] && oc get catalogsource "${CATSRC_NAME}" -n "${NAMESPACE}" &>/dev/null; then
         echo "Deleting CatalogSource '${CATSRC_NAME}'..."
@@ -132,46 +153,8 @@ Note: IDMS (imagedigestmirrorset) is not removed — delete manually if needed:
 MSG
 }
 
-convert_secret_to_brew() {
-    if ! command -v jq &>/dev/null; then
-        echo "Error: jq is required to convert the pull secret"
-        exit 1
-    fi
-
-    local dockercfg_b64
-    dockercfg_b64=$(grep '\.dockerconfigjson:' "${SECRET_PATH}" | awk '{print $2}')
-
-    if echo "${dockercfg_b64}" | base64 --decode 2>/dev/null | jq -e '.auths["brew.registry.redhat.io"]' &>/dev/null; then
-        echo "Secret already targets brew.registry.redhat.io, no conversion needed"
-        return
-    fi
-
-    echo "Converting pull secret from registry.redhat.io to brew.registry.redhat.io..."
-
-    local modified_cfg
-    modified_cfg=$(echo "${dockercfg_b64}" | base64 --decode | jq \
-        '.auths |= (if .["registry.redhat.io"] then (.["brew.registry.redhat.io"] = .["registry.redhat.io"]) | del(.["registry.redhat.io"]) else . end)')
-
-    local new_b64
-    new_b64=$(echo -n "${modified_cfg}" | base64 -w 0)
-
-    sed -i "s|\.dockerconfigjson:.*|.dockerconfigjson: ${new_b64}|" "${SECRET_PATH}"
-
-    local secret_name
-    secret_name=$(get_secret_name)
-    local new_name="brew-${secret_name}"
-    sed -i "s|name: ${secret_name}|name: ${new_name}|" "${SECRET_PATH}"
-
-    echo "Converted: registry.redhat.io -> brew.registry.redhat.io"
-    echo "Renamed secret: ${secret_name} -> ${new_name}"
-}
-
 create_catalogsource() {
     local image="brew.registry.redhat.io/rh-osbs/iib:${IIB_NR}"
-
-    # OLM v0 CatalogSource API — will be replaced by ClusterCatalog in OLM v1
-    # https://olm.operatorframework.io/docs/concepts/crds/catalogsource/
-    # https://operator-framework.github.io/operator-controller/tutorials/add-catalog/
     echo "Creating CatalogSource '${CATSRC_NAME}' with image ${image}..."
 
     if [[ "${DRY_RUN}" == "true" ]]; then
@@ -194,7 +177,6 @@ EOF
 create_pull_secret() {
     local secret_name
     secret_name=$(get_secret_name)
-
     echo "Applying pull secret '${secret_name}' in namespace ${NAMESPACE}..."
 
     if [[ "${DRY_RUN}" == "false" ]] && oc get secret "${secret_name}" -n "${NAMESPACE}" &>/dev/null; then
@@ -207,7 +189,6 @@ create_pull_secret() {
 patch_service_account() {
     local secret_name
     secret_name=$(get_secret_name)
-
     echo "Patching ServiceAccount '${CATSRC_NAME}' with pull secret '${secret_name}'..."
     run_cmd oc patch sa "${CATSRC_NAME}" -n "${NAMESPACE}" \
         --type=json \
@@ -224,35 +205,8 @@ patch_service_account() {
     fi
 }
 
-apply_idms() {
-    echo "Fetching IDMS from rhwa-fbc repo..."
-
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[dry-run] curl + oc apply -f - (IDMS from rhwa-fbc/.tekton/images-mirror-set.yaml)"
-    else
-        local idms_content
-        idms_content=$(curl -sf --header "PRIVATE-TOKEN: ${GITLAB_PRIVATE_TOKEN}" "${IDMS_RAW_URL}")
-        if [[ -z "${idms_content}" ]]; then
-            echo "Error: Failed to fetch IDMS from GitLab"
-            exit 1
-        fi
-        echo "${idms_content}" | oc apply -f -
-    fi
-
-    echo ""
-    echo "Note: If this is the first time applying the IDMS, it triggers a MachineConfigPool update."
-    echo "Nodes will be drained and rebooted. Monitor with: oc get mcp"
-}
-
-main() {
-    check_prerequisites
-
-    if [[ "${CLEANUP}" == "true" ]]; then
-        cleanup
-        exit 0
-    fi
-
-    echo "=== Deploying IIB ${IIB_NR} ==="
+deploy_v0() {
+    echo "=== Deploying IIB ${IIB_NR} (OLM v0) ==="
     if [[ "${DRY_RUN}" == "false" ]]; then
         echo "Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     fi
@@ -297,12 +251,213 @@ main() {
 
     cat <<MSG
 
-=== IIB ${IIB_NR} deployed successfully ===
+=== IIB ${IIB_NR} deployed successfully (OLM v0) ===
 
 Verify with:
   oc get catalogsource ${CATSRC_NAME} -n ${NAMESPACE}
   oc get packagemanifests -n ${NAMESPACE} | grep -E 'self-node-remediation|fence-agents-remediation|node-healthcheck-operator|node-maintenance-operator|machine-deletion-remediation|storage-based-remediation'${idms_note}
 MSG
+}
+
+# --- OLM v1 functions ---
+
+cleanup_v1() {
+    echo "Cleaning up IIB ${IIB_NR} (OLM v1)..."
+
+    if [[ "${DRY_RUN}" == "false" ]] && oc get clustercatalog "${CATSRC_NAME}" &>/dev/null; then
+        echo "Deleting ClusterCatalog '${CATSRC_NAME}'..."
+        run_cmd oc delete clustercatalog "${CATSRC_NAME}" --timeout=60s
+    elif [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[dry-run] oc delete clustercatalog ${CATSRC_NAME}"
+    else
+        echo "ClusterCatalog '${CATSRC_NAME}' not found, skipping"
+    fi
+
+    cat <<MSG
+Cleanup complete
+Note: IDMS (imagedigestmirrorset) is not removed — delete manually if needed:
+  oc delete imagedigestmirrorset rhwa-fbc-fips-image-mirror-set
+Note: Global pull-secret entries added during deploy are not removed.
+MSG
+}
+
+create_clustercatalog() {
+    local image="brew.registry.redhat.io/rh-osbs/iib:${IIB_NR}"
+    echo "Creating ClusterCatalog '${CATSRC_NAME}' with image ${image}..."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        jq -n \
+            --arg name "$CATSRC_NAME" \
+            --arg ref "$image" \
+            '{
+                apiVersion: "olm.operatorframework.io/v1",
+                kind: "ClusterCatalog",
+                metadata: {
+                    name: $name,
+                    labels: {"olm.operatorframework.io/metadata.name": $name}
+                },
+                spec: {
+                    availabilityMode: "Available",
+                    priority: -100,
+                    source: {type: "Image", image: {ref: $ref, pollIntervalMinutes: 10}}
+                }
+            }'
+        echo "[dry-run] oc apply -f - (ClusterCatalog ${CATSRC_NAME})"
+    else
+        jq -n \
+            --arg name "$CATSRC_NAME" \
+            --arg ref "$image" \
+            '{
+                apiVersion: "olm.operatorframework.io/v1",
+                kind: "ClusterCatalog",
+                metadata: {
+                    name: $name,
+                    labels: {"olm.operatorframework.io/metadata.name": $name}
+                },
+                spec: {
+                    availabilityMode: "Available",
+                    priority: -100,
+                    source: {type: "Image", image: {ref: $ref, pollIntervalMinutes: 10}}
+                }
+            }' | oc apply -f -
+    fi
+}
+
+merge_pull_secret_to_global() {
+    echo "Merging brew pull secret into global pull-secret for catalogd..."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[dry-run] merge ${SECRET_PATH} -> openshift-config/pull-secret"
+        return
+    fi
+
+    local tmpdir dockercfg_b64
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "${tmpdir:-}"' RETURN
+
+    dockercfg_b64=$(grep -m1 '\.dockerconfigjson:' "${SECRET_PATH}" | awk '{print $2}')
+    echo "${dockercfg_b64}" | base64 --decode > "${tmpdir}/brew-secret.json"
+
+    rhwa_merge_secret_file_into_global "${tmpdir}/brew-secret.json" "brew pull secret"
+}
+
+deploy_v1() {
+    echo "=== Deploying IIB ${IIB_NR} (OLM v1) ==="
+    if [[ "${DRY_RUN}" == "false" ]]; then
+        echo "Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+    fi
+    echo ""
+
+    if [[ "${CONVERT_SECRET}" == "true" ]]; then
+        convert_secret_to_brew
+    fi
+
+    merge_pull_secret_to_global
+
+    echo ""
+    create_clustercatalog
+
+    if [[ "${DRY_RUN}" == "false" ]]; then
+        echo ""
+        rhwa_wait_clustercatalog_serving "${CATSRC_NAME}" 600
+    fi
+
+    if [[ "${APPLY_IDMS}" == "true" ]]; then
+        echo ""
+        apply_idms
+    fi
+
+    local idms_note=""
+    if [[ "${APPLY_IDMS}" == "false" ]]; then
+        idms_note=$'\nIDMS was skipped. If operator images fail to pull, re-run without --no-idms'
+    fi
+
+    cat <<MSG
+
+=== IIB ${IIB_NR} deployed successfully (OLM v1) ===
+
+Verify with:
+  oc get clustercatalog ${CATSRC_NAME}
+  oc describe clustercatalog ${CATSRC_NAME}${idms_note}
+
+Next: install operators with:
+  ./helper_scripts/install_rhwa_operators.sh --catsrc ${CATSRC_NAME}
+MSG
+}
+
+# --- Shared functions ---
+
+convert_secret_to_brew() {
+    if ! command -v jq &>/dev/null; then
+        echo "Error: jq is required to convert the pull secret"
+        exit 1
+    fi
+
+    local dockercfg_b64
+    dockercfg_b64=$(grep -m1 '\.dockerconfigjson:' "${SECRET_PATH}" | awk '{print $2}')
+
+    if echo "${dockercfg_b64}" | base64 --decode 2>/dev/null | jq -e '.auths["brew.registry.redhat.io"]' &>/dev/null; then
+        echo "Secret already targets brew.registry.redhat.io, no conversion needed"
+        return
+    fi
+
+    echo "Converting pull secret from registry.redhat.io to brew.registry.redhat.io..."
+
+    local modified_cfg
+    modified_cfg=$(echo "${dockercfg_b64}" | base64 --decode | jq \
+        '.auths |= (if .["registry.redhat.io"] then (.["brew.registry.redhat.io"] = .["registry.redhat.io"]) | del(.["registry.redhat.io"]) else . end)')
+
+    local new_b64
+    new_b64=$(echo -n "${modified_cfg}" | base64 -w 0)
+
+    sed -i "s|\.dockerconfigjson:.*|.dockerconfigjson: ${new_b64}|" "${SECRET_PATH}"
+
+    local secret_name
+    secret_name=$(get_secret_name)
+    local new_name="brew-${secret_name}"
+    sed -i "s|name: ${secret_name}|name: ${new_name}|" "${SECRET_PATH}"
+
+    echo "Converted: registry.redhat.io -> brew.registry.redhat.io"
+    echo "Renamed secret: ${secret_name} -> ${new_name}"
+}
+
+apply_idms() {
+    echo "Fetching IDMS from rhwa-fbc repo..."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[dry-run] curl + oc apply -f - (IDMS from rhwa-fbc/.tekton/images-mirror-set.yaml)"
+    else
+        local idms_content
+        idms_content=$(curl -sf --header "PRIVATE-TOKEN: ${GITLAB_PRIVATE_TOKEN}" "${IDMS_RAW_URL}")
+        if [[ -z "${idms_content}" ]]; then
+            echo "Error: Failed to fetch IDMS from GitLab"
+            exit 1
+        fi
+        echo "${idms_content}" | oc apply -f -
+    fi
+
+    echo ""
+    echo "Note: If this is the first time applying the IDMS, it triggers a MachineConfigPool update."
+    echo "Nodes will be drained and rebooted. Monitor with: oc get mcp"
+}
+
+main() {
+    check_prerequisites
+
+    if [[ "${CLEANUP}" == "true" ]]; then
+        if [[ "${OLM_VERSION}" == "v1" ]]; then
+            cleanup_v1
+        else
+            cleanup_v0
+        fi
+        exit 0
+    fi
+
+    if [[ "${OLM_VERSION}" == "v1" ]]; then
+        deploy_v1
+    else
+        deploy_v0
+    fi
 }
 
 # --- Argument parsing ---
@@ -311,6 +466,14 @@ MSG
 IIB_NR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --olm)
+            OLM_VERSION="$2"
+            if [[ "$OLM_VERSION" != "v0" && "$OLM_VERSION" != "v1" ]]; then
+                echo "Error: --olm must be v0 or v1 (got: ${OLM_VERSION})" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
         --no-idms)         APPLY_IDMS=false; shift ;;
         --convert-secret)  CONVERT_SECRET=true; shift ;;
         --cleanup)         CLEANUP=true; shift ;;
@@ -330,6 +493,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "${IIB_NR}" ]] && { echo "Error: IIB_NUMBER is required"; usage; }
+[[ "${IIB_NR}" =~ ^[0-9]+$ ]] || { echo "Error: IIB_NUMBER must be numeric, got: ${IIB_NR}" >&2; exit 1; }
 
 CATSRC_NAME="${CATSRC_PREFIX}-${IIB_NR}"
 SECRET_PATH="${SECRET_PATH:-${SECRET_DEFAULT_PATH}}"
