@@ -8,6 +8,7 @@ End-to-end order for deploying RHWA operators from internal IIB or Konflux catal
 flowchart LR
   A[deploy_iib.sh] --> B[sync_clustercatalog.sh]
   B --> C[install_rhwa_operators.sh]
+  C -.->|uninstall| D[remove_rhwa_operators.sh]
 ```
 
 | Step | Script | When to use |
@@ -49,10 +50,11 @@ No IIB deploy or ClusterCatalog sync needed when using the default `redhat-opera
 ### Per-script documentation
 
 - [install_rhwa_operators.sh](helper_scripts/install_rhwa_operator.md)
+- [remove_rhwa_operators.sh](helper_scripts/remove_rhwa_operators.md)
 - [sync_clustercatalog_from_catalogsource.sh](helper_scripts/sync_clustercatalog_from_catalogsource.md)
 
 ### Troubleshooting
 
-- **CSV stuck Pending / ResolutionFailed after re-run:** orphaned CSVs from a prior install — `oc delete csv --all -n openshift-workload-availability`, then re-run install.
+- **CSV stuck Pending / ResolutionFailed after re-run:** orphaned CSVs from a prior install — run `remove_rhwa_operators.sh` or `oc delete csv --all -n openshift-workload-availability`, then re-run install.
 - **ClusterCatalog not Serving:** ensure brew pull secrets were merged (`--SYNC_PULL_SECRETS`, default on).
 - **IDMS generation fails on multi-catalog cluster:** install `opm` on the machine running the install script.
