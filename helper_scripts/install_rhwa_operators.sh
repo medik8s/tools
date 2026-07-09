@@ -8,10 +8,11 @@
 #   --catsrc-ns NS        CatalogSource namespace (default: openshift-marketplace)
 #   --namespace NS        Install operators into NS (default: openshift-workload-availability)
 #   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
-#   --approval MANUAL|AUTO InstallPlan approval (default: Automatic)
+#   --approval Manual|Automatic  InstallPlan approval (default: Automatic)
 #   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
 #   --wait                Wait for all CSVs to succeed (default: true)
+#   --no-wait             Skip waiting for CSVs
 #   --kubeconfig-from HOST (optional) Download kubeconfig from remote host via SSH (user: root).
 #                          Exports KUBECONFIG for this run.
 #   --kubeconfig-path PATH (optional) Remote path to kubeconfig when using --kubeconfig-from (default: /root/.kube/config).
@@ -31,7 +32,7 @@
 #
 # Requires helper_scripts/lib/rhwa_utils.sh (sourced from the same directory). Clone or copy the
 #   full helper_scripts/ tree. --create-idms embeds the Konflux mirror map.
-#   Requires on PATH: oc; jq only when using --create-idms. For --create-idms with a custom catalog
+#   Requires on PATH: oc, jq. For --create-idms with a custom catalog
 #   while the same packages also exist in redhat/community catalogs, install opm so the script can
 #   opm render the CatalogSource index image and read bundle relatedImages (PackageManifest is ambiguous).
 #
@@ -42,16 +43,51 @@
 set -euo pipefail
 
 _kubeconfig_tmp=""
-_subs_tmp=""
+_rhwa_exit_code=0
+_rhwa_install_started=false
 _rhwa_cleanup() {
-  rm -f "${_kubeconfig_tmp}" "${_subs_tmp}"
+  local _trap_rc=$?
+  [[ "$_rhwa_install_started" == "true" ]] && _rhwa_remove_duplicate_subs || true
+  rm -f "${_kubeconfig_tmp}"
+  exit $(( _rhwa_exit_code > 0 ? _rhwa_exit_code : _trap_rc ))
 }
 trap _rhwa_cleanup EXIT
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+_rhwa_remove_duplicate_subs() {
+  [[ -z "${NS:-}" ]] && return 0
+  [[ -v ALL_PACKAGES ]] || return 0
+  [[ ${#ALL_PACKAGES[@]} -eq 0 ]] && return 0
+  oc whoami &>/dev/null || return 0
+  echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
+  local _local_subs_tmp
+  _local_subs_tmp=$(mktemp)
+  for _pass in 1 2; do
+    [[ $_pass -eq 2 ]] && sleep 3
+    oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_local_subs_tmp" || true
+    while read -r sub_meta_name spec_name; do
+      [[ -z "$sub_meta_name" ]] && continue
+      for pkg in "${ALL_PACKAGES[@]}"; do
+        if [[ "$spec_name" == "$pkg" ]]; then
+          canonical="${pkg}-operator"
+          if [[ "$sub_meta_name" != "$canonical" ]]; then
+            oc delete subscription "$sub_meta_name" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted duplicate subscription: $sub_meta_name" || true
+          fi
+          break
+        fi
+      done
+    done < "$_local_subs_tmp" 2>/dev/null || true
+  done
+  rm -f "$_local_subs_tmp"
+}
+
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' NC=''
+fi
 
 NS=openshift-workload-availability
 CHANNEL=stable
@@ -67,6 +103,8 @@ KUBECONFIG_REMOTE_PATH="/root/.kube/config"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/rhwa_utils.sh
 source "${SCRIPT_DIR}/lib/rhwa_utils.sh"
+
+command -v jq >/dev/null 2>&1 || { echo "Error: jq is required" >&2; exit 1; }
 # NHC console plugin name (ConsolePlugin.metadata.name created by NHC operator)
 NHC_CONSOLE_PLUGIN_NAME="${NHC_CONSOLE_PLUGIN_NAME:-node-remediation-console-plugin}"
 NHC_CONSOLE_PLUGIN_WAIT="${NHC_CONSOLE_PLUGIN_WAIT:-300}"
@@ -314,26 +352,33 @@ rhwa_create_idms_from_catsrc() {
   fi
 
   mkdir -p "$(dirname "$output")"
-  {
-    echo "apiVersion: config.openshift.io/v1"
-    echo "kind: ImageDigestMirrorSet"
-    echo "metadata:"
-    # Intentionally same name as deploy_iib.sh IDMS — --create-idms supersedes it with live catalog data
-    echo "  name: rhwa-fbc-fips-image-mirror-set"
-    echo "  labels:"
-    echo "    rhwa.redhat.com/generated-from-catalog: \"${catsrc}\""
-    echo "  annotations:"
-    echo "    rhwa.redhat.com/generated-at: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
-    echo "    rhwa.redhat.com/catalog-channel: \"${channel}\""
-    echo "spec:"
-    echo "  imageDigestMirrors:"
-    local s
-    for s in $(printf '%s\n' "${!mirror_entries[@]}" | sort); do
-      echo "    - mirrors:"
-      echo "        - ${mirror_entries[$s]}"
-      echo "      source: ${s}"
-    done
-  } > "$output"
+  local _mirrors_json='[]'
+  local s
+  for s in $(printf '%s\n' "${!mirror_entries[@]}" | sort); do
+    _mirrors_json=$(echo "$_mirrors_json" | jq --arg src "$s" --arg mir "${mirror_entries[$s]}" \
+      '. + [{"mirrors": [$mir], "source": $src}]')
+  done
+  # Intentionally same name as deploy_iib.sh IDMS — --create-idms supersedes it with live catalog data
+  local _timestamp
+  _timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -n \
+    --arg catsrc "$catsrc" \
+    --arg ts "$_timestamp" \
+    --arg channel "$channel" \
+    --argjson mirrors "$_mirrors_json" \
+    '{
+      apiVersion: "config.openshift.io/v1",
+      kind: "ImageDigestMirrorSet",
+      metadata: {
+        name: "rhwa-fbc-fips-image-mirror-set",
+        labels: {"rhwa.redhat.com/generated-from-catalog": $catsrc},
+        annotations: {
+          "rhwa.redhat.com/generated-at": $ts,
+          "rhwa.redhat.com/catalog-channel": $channel
+        }
+      },
+      spec: {imageDigestMirrors: $mirrors}
+    }' > "$output"
 
   echo -e "${GREEN}Wrote ImageDigestMirrorSet (${#mirror_entries[@]} entries): ${output}${NC}"
   for pkg in "${!pkg_versions[@]}"; do
@@ -346,7 +391,7 @@ rhwa_create_idms_from_catsrc() {
 }
 
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^#   /  /' | sed 's/^# //'
+  sed -n '2,40p' "$0" | sed 's/^#   /  /' | sed 's/^# //'
   echo ""
   echo "  Defaults: channel=$CHANNEL, catsrc=$CATSRC, namespace=$NS, approval=$APPROVAL, nhc-plugin=enabled"
   echo "  --create-idms: wait for catalog READY, write <script-dir>/idms/imageDigestMirrorSet_<catsrc>.yaml, oc apply, then install"
@@ -362,6 +407,7 @@ while [[ $# -gt 0 ]]; do
     --only)         ONLY_LIST="$2"; shift 2 ;;
     --disable-nhc-plugin) ENABLE_NHC_PLUGIN=false; shift ;;
     --approval)     APPROVAL="$2"; shift 2 ;;
+    --wait)         WAIT=true; shift ;;
     --no-wait)      WAIT=false; shift ;;
     --create-idms)  CREATE_IDMS=true; shift ;;
     --kubeconfig-from) KUBECONFIG_FROM="$2"; shift 2 ;;
@@ -418,6 +464,7 @@ if ! oc whoami &>/dev/null; then
   exit 1
 fi
 
+_rhwa_install_started=true
 echo -e "${GREEN}Installing RHWA operators: ${PACKAGES[*]}${NC}"
 echo "  channel: $CHANNEL, catalog: $CATSRC ($CATSRC_NS), namespace: $NS, approval: $APPROVAL"
 echo "  enable NHC console plugin: $ENABLE_NHC_PLUGIN"
@@ -427,7 +474,6 @@ echo "    oc patch deployment catalog-operator -n openshift-operator-lifecycle-m
 echo ""
 
 if [[ "$CREATE_IDMS" == "true" ]]; then
-  command -v jq >/dev/null || { echo -e "${RED}jq required for --create-idms${NC}" >&2; exit 1; }
   if ! oc get "catalogsource/${CATSRC}" -n "${CATSRC_NS}" &>/dev/null; then
     echo -e "${RED}CatalogSource ${CATSRC} not found in ${CATSRC_NS}. Create it first (e.g. setup_clusterbot.sh).${NC}" >&2
     exit 1
@@ -459,13 +505,9 @@ for extra_og in $(oc get operatorgroup -n "$NS" -o jsonpath='{range .items[*]}{.
 done
 if ! oc get operatorgroup "$og_name" -n "$NS" &>/dev/null; then
   echo -e "${YELLOW}Creating OperatorGroup in $NS${NC}"
-  oc apply -f - <<YAML
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: ${og_name}
-  namespace: ${NS}
-YAML
+  jq -n --arg name "$og_name" --arg ns "$NS" \
+    '{apiVersion:"operators.coreos.com/v1",kind:"OperatorGroup",metadata:{name:$name,namespace:$ns}}' \
+    | oc apply -f -
 fi
 
 # Yields e.g. nhc-operator-operator for pkgs ending in -operator — cosmetic, not worth renaming (breaks existing clusters)
@@ -473,22 +515,25 @@ for pkg in "${PACKAGES[@]}"; do
   sub_name="${pkg}-operator"
   if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then
     echo "  Subscription $sub_name already exists, patching channel to $CHANNEL"
-    oc patch subscription "$sub_name" -n "$NS" --type=merge -p "{\"spec\":{\"channel\":\"${CHANNEL}\"}}"
+    _sub_patch=$(jq -n --arg ch "$CHANNEL" '{"spec":{"channel":$ch}}')
+    oc patch subscription "$sub_name" -n "$NS" --type=merge -p "$_sub_patch"
   else
     echo "  Creating Subscription for $pkg (channel: $CHANNEL)"
-    oc apply -f - <<YAML
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: ${sub_name}
-  namespace: ${NS}
-spec:
-  channel: ${CHANNEL}
-  installPlanApproval: ${APPROVAL}
-  name: ${pkg}
-  source: ${CATSRC}
-  sourceNamespace: ${CATSRC_NS}
-YAML
+    _sub_json=$(jq -n \
+      --arg name "$sub_name" \
+      --arg ns "$NS" \
+      --arg channel "$CHANNEL" \
+      --arg approval "$APPROVAL" \
+      --arg pkg "$pkg" \
+      --arg catsrc "$CATSRC" \
+      --arg catsrcNs "$CATSRC_NS" \
+      '{
+        apiVersion: "operators.coreos.com/v1alpha1",
+        kind: "Subscription",
+        metadata: {name: $name, namespace: $ns},
+        spec: {channel: $channel, installPlanApproval: $approval, name: $pkg, source: $catsrc, sourceNamespace: $catsrcNs}
+      }')
+    echo "$_sub_json" | oc apply -f -
   fi
 done
 
@@ -507,11 +552,14 @@ if [[ "$WAIT" == "true" ]]; then
           break
         fi
         if [[ "$phase" == "Failed" ]]; then
-          echo -e "  ${RED}$pkg: $csv_name phase=Failed${NC}" >&2
+          echo -e "  ${RED}$pkg: $csv_name phase=Failed — will not recover without manual intervention${NC}" >&2
+          _rhwa_exit_code=1
+          exit 1
         fi
       fi
       if (( $(date +%s) - start_ts > timeout_s )); then
         echo -e "${RED}Timeout waiting for $pkg CSV${NC}" >&2
+        _rhwa_exit_code=1
         exit 1
       fi
       sleep 5
@@ -524,49 +572,34 @@ fi
 if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG} "* ]]; then
   echo ""
   echo -e "${YELLOW}Enabling NHC console plugin: $NHC_CONSOLE_PLUGIN_NAME${NC}"
-  if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null 2>&1; then
-    echo "  ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found yet (NHC operator may still be deploying it)."
+  if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
+    echo "  Waiting for ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME (up to ${NHC_CONSOLE_PLUGIN_WAIT}s)..."
+    _cp_deadline=$(( $(date +%s) + NHC_CONSOLE_PLUGIN_WAIT ))
+    while (( $(date +%s) < _cp_deadline )); do
+      oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null && break
+      sleep 5
+    done
   fi
-  # spec.plugins lives on operator.openshift.io/v1 Console, not config.openshift.io
-  if oc get console.operator.openshift.io cluster -o name &>/dev/null 2>&1; then
-    current=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins[*]}' 2>/dev/null || echo "")
-    if echo "$current" | tr ' ' '\n' | grep -q "^${NHC_CONSOLE_PLUGIN_NAME}$"; then
+  if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
+    echo -e "  ${RED}ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found after ${NHC_CONSOLE_PLUGIN_WAIT}s — skipping plugin enable.${NC}" >&2
+  elif oc get console.operator.openshift.io cluster -o name &>/dev/null; then
+    current_json=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null || echo "[]")
+    if echo "$current_json" | jq -e --arg p "$NHC_CONSOLE_PLUGIN_NAME" 'index($p) != null' &>/dev/null; then
       echo "  Plugin $NHC_CONSOLE_PLUGIN_NAME already enabled in Console."
     else
-      if oc patch console.operator.openshift.io cluster --type=json -p "[{\"op\":\"add\",\"path\":\"/spec/plugins/-\",\"value\":\"${NHC_CONSOLE_PLUGIN_NAME}\"}]" 2>/dev/null; then
+      new_plugins=$(echo "$current_json" | jq --arg p "$NHC_CONSOLE_PLUGIN_NAME" \
+        'if type == "array" then . + [$p] | unique else [$p] end')
+      patch_json=$(jq -n --argjson plugins "$new_plugins" '{"spec":{"plugins":$plugins}}')
+      if oc patch console.operator.openshift.io cluster --type=merge -p "$patch_json" 2>/dev/null; then
         echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console."
       else
-        oc patch console.operator.openshift.io cluster --type=merge -p "{\"spec\":{\"plugins\":[\"${NHC_CONSOLE_PLUGIN_NAME}\"]}}" 2>/dev/null && echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console." || echo "  Could not patch Console (plugin may need to be enabled manually)."
+        echo "  Could not patch Console (plugin may need to be enabled manually)."
       fi
     fi
   else
     echo "  Console.operator.openshift.io cluster not found; skip plugin enable."
   fi
 fi
-
-# Remove duplicate subscriptions for the same package. OLM can create the long-named one
-# (e.g. self-node-remediation-stable-redhat-operators-openshift-marketplace). Run twice
-# and use a temp file so we don't miss any (no subshell from pipe).
-echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
-_subs_tmp=$(mktemp)
-for _pass in 1 2; do
-  [[ $_pass -eq 2 ]] && sleep 3
-  oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_subs_tmp" || true
-  while read -r sub_meta_name spec_name; do
-    [[ -z "$sub_meta_name" ]] && continue
-    # Is this one of our packages?
-    found=""
-    for pkg in "${ALL_PACKAGES[@]}"; do
-      if [[ "$spec_name" == "$pkg" ]]; then
-        canonical="${pkg}-operator"
-        if [[ "$sub_meta_name" != "$canonical" ]]; then
-          oc delete subscription "$sub_meta_name" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted duplicate subscription: $sub_meta_name" || true
-        fi
-        break
-      fi
-    done
-  done < "$_subs_tmp" 2>/dev/null || true
-done
 
 echo ""
 echo -e "${GREEN}Done. Operators installed in namespace: $NS${NC}"
