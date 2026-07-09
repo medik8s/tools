@@ -1,6 +1,6 @@
 ## helper_scripts/install_rhwa_operators.sh
 
-Install RHWA operators (NHC, SNR, NMO, MDR, FAR) on an OCP cluster. Tested on Clusterbot, BM, and HyperShift. With `--create-idms`, the script can generate and apply an ImageDigestMirrorSet from a custom catalog source.
+Install RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) on an OCP cluster. Tested on Clusterbot, BM, and HyperShift. With `--create-idms`, the script can generate and apply an ImageDigestMirrorSet from a custom catalog source.
 
 See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 

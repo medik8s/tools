@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 ################################################################################
-# Remove RHWA operators (NHC, SNR, NMO, MDR, FAR) from all namespaces.
+# Remove RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) from all namespaces.
 # Also deletes OLM v0 leftover ClusterRoles that block OLM v1 ClusterExtension
 # (metrics-reader and *-ext-remediation roles).
 #
 # Options:
-#   --only LIST              Remove only these operators (comma-separated: nhc,snr,nmo,mdr,far). Default: all.
+#   --only LIST              Remove only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --kubeconfig-from HOST   Download kubeconfig from remote host via SSH (defaults to root@).
 #   --kubeconfig-path PATH   Remote kubeconfig path when using --kubeconfig-from (default: /root/.kube/config).
 #
@@ -36,7 +36,8 @@ SNR_PKG="self-node-remediation"
 NMO_PKG="node-maintenance-operator"
 MDR_PKG="machine-deletion-remediation"
 FAR_PKG="fence-agents-remediation"
-ALL_OPERATORS=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG")
+SBR_PKG="storage-based-remediation"
+ALL_OPERATORS=("$NHC_PKG" "$SNR_PKG" "$NMO_PKG" "$MDR_PKG" "$FAR_PKG" "$SBR_PKG")
 ONLY_LIST=""
 KUBECONFIG_FROM=""
 KUBECONFIG_REMOTE_PATH="/root/.kube/config"
@@ -48,6 +49,7 @@ only_to_pkg() {
     nmo) echo "$NMO_PKG" ;;
     mdr) echo "$MDR_PKG" ;;
     far) echo "$FAR_PKG" ;;
+    sbr) echo "$SBR_PKG" ;;
     *) echo "" ;;
   esac
 }
@@ -59,6 +61,7 @@ rhwa_op_to_clusterextension() {
     "$SNR_PKG") echo "self-node-remediation" ;;
     "$MDR_PKG") echo "machine-deletion-remediation" ;;
     "$NMO_PKG") echo "node-maintenance-operator" ;;
+    "$SBR_PKG") echo "storage-based-remediation" ;;
     *) echo "" ;;
   esac
 }
@@ -70,6 +73,7 @@ rhwa_op_to_crd_group() {
     "$SNR_PKG") echo "self-node-remediation.medik8s.io" ;;
     "$MDR_PKG") echo "machine-deletion-remediation.medik8s.io" ;;
     "$NMO_PKG") echo "nodemaintenance.medik8s.io" ;;
+    "$SBR_PKG") echo "storage-based-remediation.medik8s.io" ;;
     *) echo "" ;;
   esac
 }
@@ -94,6 +98,12 @@ rhwa_add_stale_clusterroles_for_op() {
       ;;
     "$NMO_PKG")
       rhwa_add_stale_clusterrole "node-maintenance-operator-metrics-reader"
+      ;;
+    "$SBR_PKG")
+      rhwa_add_stale_clusterrole "storage-based-remediation-metrics-reader"
+      rhwa_add_stale_clusterrole "storage-based-remediation-ext-remediation"
+      rhwa_add_stale_clusterrole "sbr-operator-metrics-reader"
+      rhwa_add_stale_clusterrole "sbr-operator-ext-remediation"
       ;;
   esac
 }
@@ -134,11 +144,11 @@ if [[ -n "${ONLY_LIST:-}" ]]; then
     if [[ -n "$pkg" ]]; then
       OPERATORS+=("$pkg")
     else
-      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far)${NC}" >&2
+      echo -e "${RED}Unknown operator in --only: $short (use: nhc,snr,nmo,mdr,far,sbr)${NC}" >&2
       exit 1
     fi
   done < <(echo "$ONLY_LIST" | tr ',' '\n')
-  [[ ${#OPERATORS[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far)${NC}" >&2 && exit 1
+  [[ ${#OPERATORS[@]} -eq 0 ]] && echo -e "${RED}--only must list at least one operator (nhc,snr,nmo,mdr,far,sbr)${NC}" >&2 && exit 1
 else
   OPERATORS=("${ALL_OPERATORS[@]}")
 fi
