@@ -1,6 +1,6 @@
 ## helper_scripts/install_rhwa_operators.sh
 
-Install RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) on an OCP cluster. Tested on Clusterbot, BM, and HyperShift. With `--create-idms`, the script can generate and apply an ImageDigestMirrorSet from a custom catalog source.
+Install RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) on an OCP cluster. Tested on Clusterbot, BM, and HyperShift. Supports OLM v0 (Subscriptions, default) and OLM v1 (ClusterExtension). With `--create-idms`, the script can generate and apply an ImageDigestMirrorSet from a custom catalog source.
 
 See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 
@@ -21,6 +21,7 @@ $ ./helper_scripts/install_rhwa_operators.sh --help
 Install all 6 RHWA operators: NHC, SNR, NMO, MDR, FAR, SBR.
 
 Options:
+  --olm v0|v1           OLM version: v0 uses Subscriptions (default), v1 uses ClusterExtension
   --channel CHANNEL     Subscription channel (default: stable)
   --catsrc NAME         CatalogSource name (default: redhat-operators)
   --catsrc-ns NS        CatalogSource namespace (default: openshift-marketplace)

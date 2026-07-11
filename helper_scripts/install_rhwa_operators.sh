@@ -9,6 +9,7 @@
 #   --namespace NS        Install operators into NS (default: openshift-workload-availability)
 #   --disable-nhc-plugin   Do not enable NHC console plugin (enabled by default)
 #   --approval Manual|Automatic  InstallPlan approval (default: Automatic)
+#   --olm v0|v1           OLM version: v0 uses Subscriptions (default), v1 uses ClusterExtension
 #   --only LIST           Install only these operators (comma-separated: nhc,snr,nmo,mdr,far,sbr). Default: all.
 #   --create-idms         Wait for --catsrc to be READY, generate IDMS from latest catalog versions, apply it, then install
 #   --wait                Wait for all CSVs to succeed (default: true)
@@ -97,6 +98,7 @@ ENABLE_NHC_PLUGIN=true
 APPROVAL=Automatic
 WAIT=true
 CREATE_IDMS=false
+OLM_VERSION=v0
 IDMS_WAIT_TIMEOUT=600
 KUBECONFIG_FROM=""
 KUBECONFIG_REMOTE_PATH="/root/.kube/config"
@@ -400,18 +402,25 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --channel)      CHANNEL="$2"; shift 2 ;;
-    --catsrc)       CATSRC="$2"; shift 2 ;;
-    --catsrc-ns)    CATSRC_NS="$2"; shift 2 ;;
-    --namespace)    NS="$2"; shift 2 ;;
-    --only)         ONLY_LIST="$2"; shift 2 ;;
+    --olm)
+      [[ $# -lt 2 ]] && { echo -e "${RED}--olm requires a value (v0 or v1)${NC}" >&2; exit 1; }
+      OLM_VERSION="$2"
+      if [[ "$OLM_VERSION" != "v0" && "$OLM_VERSION" != "v1" ]]; then
+        echo -e "${RED}--olm must be v0 or v1 (got: ${OLM_VERSION})${NC}" >&2; exit 1
+      fi
+      shift 2 ;;
+    --channel)      [[ $# -lt 2 ]] && { echo -e "${RED}--channel requires a value${NC}" >&2; exit 1; }; CHANNEL="$2"; shift 2 ;;
+    --catsrc)       [[ $# -lt 2 ]] && { echo -e "${RED}--catsrc requires a value${NC}" >&2; exit 1; }; CATSRC="$2"; shift 2 ;;
+    --catsrc-ns)    [[ $# -lt 2 ]] && { echo -e "${RED}--catsrc-ns requires a value${NC}" >&2; exit 1; }; CATSRC_NS="$2"; shift 2 ;;
+    --namespace)    [[ $# -lt 2 ]] && { echo -e "${RED}--namespace requires a value${NC}" >&2; exit 1; }; NS="$2"; shift 2 ;;
+    --only)         [[ $# -lt 2 ]] && { echo -e "${RED}--only requires a value${NC}" >&2; exit 1; }; ONLY_LIST="$2"; shift 2 ;;
     --disable-nhc-plugin) ENABLE_NHC_PLUGIN=false; shift ;;
-    --approval)     APPROVAL="$2"; shift 2 ;;
+    --approval)     [[ $# -lt 2 ]] && { echo -e "${RED}--approval requires a value${NC}" >&2; exit 1; }; APPROVAL="$2"; shift 2 ;;
     --wait)         WAIT=true; shift ;;
     --no-wait)      WAIT=false; shift ;;
     --create-idms)  CREATE_IDMS=true; shift ;;
-    --kubeconfig-from) KUBECONFIG_FROM="$2"; shift 2 ;;
-    --kubeconfig-path) KUBECONFIG_REMOTE_PATH="$2"; shift 2 ;;
+    --kubeconfig-from) [[ $# -lt 2 ]] && { echo -e "${RED}--kubeconfig-from requires a value${NC}" >&2; exit 1; }; KUBECONFIG_FROM="$2"; shift 2 ;;
+    --kubeconfig-path) [[ $# -lt 2 ]] && { echo -e "${RED}--kubeconfig-path requires a value${NC}" >&2; exit 1; }; KUBECONFIG_REMOTE_PATH="$2"; shift 2 ;;
     -h|--help)      usage ;;
     *) echo -e "${RED}Unknown option: $1${NC}" >&2; usage ;;
   esac
@@ -469,11 +478,17 @@ echo -e "${GREEN}Installing RHWA operators: ${PACKAGES[*]}${NC}"
 echo "  channel: $CHANNEL, catalog: $CATSRC ($CATSRC_NS), namespace: $NS, approval: $APPROVAL"
 echo "  enable NHC console plugin: $ENABLE_NHC_PLUGIN"
 echo "  create IDMS from catalog: $CREATE_IDMS"
-echo "  If some CSVs never appear or stay Pending: OLM bundle unpack may be timing out. Increase timeout with:"
-echo "    oc patch deployment catalog-operator -n openshift-operator-lifecycle-manager --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"--bundle-unpack-timeout\"},{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"30m\"}]'"
+echo "  OLM version: $OLM_VERSION"
+if [[ "$OLM_VERSION" == "v0" ]]; then
+  echo "  If some CSVs never appear or stay Pending: OLM bundle unpack may be timing out. Increase timeout with:"
+  echo "    oc patch deployment catalog-operator -n openshift-operator-lifecycle-manager --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"--bundle-unpack-timeout\"},{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"30m\"}]'"
+fi
 echo ""
 
 if [[ "$CREATE_IDMS" == "true" ]]; then
+  if [[ "$OLM_VERSION" == "v1" ]]; then
+    echo -e "${RED}--create-idms is not yet supported with --olm v1${NC}" >&2; exit 1
+  fi
   if ! oc get "catalogsource/${CATSRC}" -n "${CATSRC_NS}" &>/dev/null; then
     echo -e "${RED}CatalogSource ${CATSRC} not found in ${CATSRC_NS}. Create it first (e.g. setup_clusterbot.sh).${NC}" >&2
     exit 1
@@ -487,121 +502,296 @@ if [[ "$CREATE_IDMS" == "true" ]]; then
   echo ""
 fi
 
-# Ensure namespace and OperatorGroup
+# Ensure namespace exists
 if ! oc get ns "$NS" &>/dev/null; then
   echo -e "${YELLOW}Creating namespace $NS${NC}"
   oc create namespace "$NS"
 fi
 
-# OperatorGroup: match rhwa_testing_data.sh — metadata only, no spec.
-# OLM requires exactly one OperatorGroup per namespace; it may auto-create one (e.g. openshift-workload-availability-xxxx).
-# Keep only our canonical one so "found 2 operatorGroups, expected 1" does not block installs.
-og_name=workload-availability-operator-group
-for extra_og in $(oc get operatorgroup -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-  if [[ -n "$extra_og" && "$extra_og" != "$og_name" ]]; then
-    echo -e "${YELLOW}Removing extra OperatorGroup $extra_og (OLM allows only one per namespace)${NC}"
-    oc delete operatorgroup "$extra_og" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null || true
+if [[ "$OLM_VERSION" == "v1" ]]; then
+  # --- OLM v1: ClusterExtension + ServiceAccount + RBAC ---
+  if ! oc api-resources --api-group=olm.operatorframework.io 2>/dev/null | grep -q ClusterExtension; then
+    echo -e "${RED}OLM v1 CRDs not found on this cluster (ClusterExtension). OLM v1 requires OCP >= 4.18.${NC}" >&2
+    exit 1
   fi
-done
-if ! oc get operatorgroup "$og_name" -n "$NS" &>/dev/null; then
-  echo -e "${YELLOW}Creating OperatorGroup in $NS${NC}"
-  jq -n --arg name "$og_name" --arg ns "$NS" \
-    '{apiVersion:"operators.coreos.com/v1",kind:"OperatorGroup",metadata:{name:$name,namespace:$ns}}' \
-    | oc apply -f -
-fi
 
-# Yields e.g. nhc-operator-operator for pkgs ending in -operator — cosmetic, not worth renaming (breaks existing clusters)
-for pkg in "${PACKAGES[@]}"; do
-  sub_name="${pkg}-operator"
-  if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then
-    echo "  Subscription $sub_name already exists, patching channel to $CHANNEL"
-    _sub_patch=$(jq -n --arg ch "$CHANNEL" '{"spec":{"channel":$ch}}')
-    oc patch subscription "$sub_name" -n "$NS" --type=merge -p "$_sub_patch"
-  else
-    echo "  Creating Subscription for $pkg (channel: $CHANNEL)"
-    _sub_json=$(jq -n \
-      --arg name "$sub_name" \
-      --arg ns "$NS" \
-      --arg channel "$CHANNEL" \
-      --arg approval "$APPROVAL" \
-      --arg pkg "$pkg" \
-      --arg catsrc "$CATSRC" \
-      --arg catsrcNs "$CATSRC_NS" \
-      '{
-        apiVersion: "operators.coreos.com/v1alpha1",
-        kind: "Subscription",
-        metadata: {name: $name, namespace: $ns},
-        spec: {channel: $channel, installPlanApproval: $approval, name: $pkg, source: $catsrc, sourceNamespace: $catsrcNs}
-      }')
-    echo "$_sub_json" | oc apply -f -
+  # OCP 5.0+ prefixes default catalogs with "openshift-" (e.g. redhat-operators → openshift-redhat-operators).
+  # Resolve the actual ClusterCatalog name for the label selector.
+  V1_CATSRC="$CATSRC"
+  if ! oc get clustercatalog "$V1_CATSRC" &>/dev/null; then
+    if oc get clustercatalog "openshift-${CATSRC}" &>/dev/null; then
+      V1_CATSRC="openshift-${CATSRC}"
+      echo "  Resolved ClusterCatalog name: ${CATSRC} → ${V1_CATSRC}"
+    else
+      echo -e "${RED}ClusterCatalog '${CATSRC}' not found (also tried 'openshift-${CATSRC}').${NC}" >&2
+      echo "  Available ClusterCatalogs:"
+      oc get clustercatalog -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | sed 's/^/    /'
+      exit 1
+    fi
   fi
-done
 
-if [[ "$WAIT" == "true" ]]; then
-  echo ""
-  echo -e "${YELLOW}Waiting for all operator CSVs to reach Succeeded (timeout 15m each)...${NC}"
+  # Create a ServiceAccount per operator with cluster-admin RBAC.
+  # cluster-admin is intentional for QE/lab — deriving per-operator RBAC from CSVs is fragile.
   for pkg in "${PACKAGES[@]}"; do
-    start_ts=$(date +%s)
-    timeout_s=900
-    while true; do
-      csv_name=$(oc get csv -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "^${pkg}\." | head -1 || true)
-      if [[ -n "${csv_name:-}" ]]; then
-        phase=$(oc get csv -n "$NS" "$csv_name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-        if [[ "$phase" == "Succeeded" ]]; then
-          echo "  $pkg: $csv_name (Succeeded)"
+    sa_name="${pkg}-installer"
+    crb_name="${pkg}-installer-admin"
+
+    if ! oc get sa "$sa_name" -n "$NS" &>/dev/null; then
+      echo "  Creating ServiceAccount ${sa_name} in ${NS}"
+      oc create serviceaccount "$sa_name" -n "$NS"
+    else
+      echo "  ServiceAccount ${sa_name} already exists"
+    fi
+
+    if ! oc get clusterrolebinding "$crb_name" &>/dev/null; then
+      echo "  Creating ClusterRoleBinding ${crb_name} (cluster-admin)"
+      jq -n --arg name "$crb_name" --arg sa "$sa_name" --arg ns "$NS" \
+        '{apiVersion:"rbac.authorization.k8s.io/v1",kind:"ClusterRoleBinding",
+          metadata:{name:$name},
+          roleRef:{apiGroup:"rbac.authorization.k8s.io",kind:"ClusterRole",name:"cluster-admin"},
+          subjects:[{kind:"ServiceAccount",name:$sa,namespace:$ns}]}' \
+        | oc apply -f -
+    else
+      echo "  ClusterRoleBinding ${crb_name} already exists"
+    fi
+  done
+
+  echo ""
+  echo -e "${YELLOW}Creating ClusterExtensions...${NC}"
+  for pkg in "${PACKAGES[@]}"; do
+    ce_name="${pkg}"
+    sa_name="${pkg}-installer"
+
+    if oc get clusterextension "$ce_name" &>/dev/null; then
+      echo "  ClusterExtension ${ce_name} already exists, skipping"
+      continue
+    fi
+
+    echo "  Creating ClusterExtension for ${pkg} (channel: ${CHANNEL}, catalog: ${V1_CATSRC})"
+    jq -n \
+      --arg name "$ce_name" --arg ns "$NS" --arg sa "$sa_name" \
+      --arg pkg "$pkg" --arg ch "$CHANNEL" --arg catsrc "$V1_CATSRC" \
+      '{apiVersion:"olm.operatorframework.io/v1",kind:"ClusterExtension",
+        metadata:{name:$name},
+        spec:{namespace:$ns,serviceAccount:{name:$sa},
+          source:{sourceType:"Catalog",
+            catalog:{packageName:$pkg,channels:[$ch],
+              selector:{matchLabels:{"olm.operatorframework.io/metadata.name":$catsrc}}}}}}' \
+      | oc apply -f -
+  done
+
+  if [[ "$WAIT" == "true" ]]; then
+    echo ""
+    echo -e "${YELLOW}Waiting for all ClusterExtensions to be Installed (timeout 15m each)...${NC}"
+    for pkg in "${PACKAGES[@]}"; do
+      ce_name="${pkg}"
+      start_ts=$(date +%s)
+      timeout_s=900
+      while true; do
+        installed=$(oc get clusterextension "$ce_name" \
+          -o jsonpath='{range .status.conditions[*]}{.type}{"="}{.status}{" "}{end}' 2>/dev/null || echo "")
+        if echo "$installed" | grep -q 'Installed=True'; then
+          echo -e "  ${GREEN}${ce_name}: Installed${NC}"
           break
         fi
-        if [[ "$phase" == "Failed" ]]; then
-          echo -e "  ${RED}$pkg: $csv_name phase=Failed — will not recover without manual intervention${NC}" >&2
-          _rhwa_exit_code=1
+        prog_msg=$(oc get clusterextension "$ce_name" \
+          -o jsonpath='{range .status.conditions[?(@.type=="Progressing")]}{.message}{end}' 2>/dev/null || true)
+        if echo "$installed" | grep -q 'Installed=False'; then
+          fail_msg=$(oc get clusterextension "$ce_name" \
+            -o jsonpath='{range .status.conditions[?(@.type=="Installed")]}{.message}{end}' 2>/dev/null || true)
+          fail_reason=$(oc get clusterextension "$ce_name" \
+            -o jsonpath='{range .status.conditions[?(@.type=="Installed")]}{.reason}{end}' 2>/dev/null || true)
+          if [[ "$fail_msg" != "${_prev_fail_msg:-}" ]]; then
+            echo -e "  ${RED}${ce_name}: Installed=False (${fail_reason}): ${fail_msg}${NC}" >&2
+            _prev_fail_msg="$fail_msg"
+          fi
+          if [[ "$fail_reason" == "Failed" ]]; then
+            echo -e "${RED}${ce_name}: terminal failure (${fail_reason}), not retrying${NC}" >&2
+            exit 1
+          fi
+        fi
+        if (( $(date +%s) - start_ts > timeout_s )); then
+          echo -e "${RED}Timeout waiting for ClusterExtension ${ce_name}${NC}" >&2
+          oc describe clusterextension "$ce_name" 2>/dev/null | tail -20 >&2 || true
           exit 1
         fi
-      fi
-      if (( $(date +%s) - start_ts > timeout_s )); then
-        echo -e "${RED}Timeout waiting for $pkg CSV${NC}" >&2
-        _rhwa_exit_code=1
-        exit 1
-      fi
-      sleep 5
+        if [[ -n "$prog_msg" && "$prog_msg" != "${_prev_prog_msg:-}" ]]; then
+          echo "    Progressing: ${prog_msg}"
+          _prev_prog_msg="$prog_msg"
+        fi
+        sleep 10
+      done
     done
-  done
-  echo -e "${GREEN}All operator CSVs Succeeded.${NC}"
-fi
+    echo -e "${GREEN}All ClusterExtensions Installed.${NC}"
+  fi
 
-# Optionally enable NHC console plugin (only if NHC is in PACKAGES)
-if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG} "* ]]; then
   echo ""
-  echo -e "${YELLOW}Enabling NHC console plugin: $NHC_CONSOLE_PLUGIN_NAME${NC}"
-  if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
-    echo "  Waiting for ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME (up to ${NHC_CONSOLE_PLUGIN_WAIT}s)..."
-    _cp_deadline=$(( $(date +%s) + NHC_CONSOLE_PLUGIN_WAIT ))
-    while (( $(date +%s) < _cp_deadline )); do
-      oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null && break
-      sleep 5
-    done
-  fi
-  if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
-    echo -e "  ${RED}ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found after ${NHC_CONSOLE_PLUGIN_WAIT}s — skipping plugin enable.${NC}" >&2
-  elif oc get console.operator.openshift.io cluster -o name &>/dev/null; then
-    current_json=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null || echo "[]")
-    if echo "$current_json" | jq -e --arg p "$NHC_CONSOLE_PLUGIN_NAME" 'index($p) != null' &>/dev/null; then
-      echo "  Plugin $NHC_CONSOLE_PLUGIN_NAME already enabled in Console."
-    else
-      new_plugins=$(echo "$current_json" | jq --arg p "$NHC_CONSOLE_PLUGIN_NAME" \
-        'if type == "array" then . + [$p] | unique else [$p] end')
-      patch_json=$(jq -n --argjson plugins "$new_plugins" '{"spec":{"plugins":$plugins}}')
-      if oc patch console.operator.openshift.io cluster --type=merge -p "$patch_json" 2>/dev/null; then
-        echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console."
-      else
-        echo "  Could not patch Console (plugin may need to be enabled manually)."
-      fi
-    fi
-  else
-    echo "  Console.operator.openshift.io cluster not found; skip plugin enable."
-  fi
-fi
+  echo -e "${GREEN}Done (OLM v1). Operators installed in namespace: $NS${NC}"
+  echo "  Check: oc get clusterextension"
+  echo "  Check: oc get pods -n $NS"
+  echo "  To uninstall: delete ClusterExtensions, then their ServiceAccounts and ClusterRoleBindings:"
+  echo "    oc delete clusterextension ${PACKAGES[*]}"
+  echo "    oc delete clusterrolebinding $(printf '%s-installer-admin ' "${PACKAGES[@]}")"
+  echo "    oc delete sa -n $NS $(printf '%s-installer ' "${PACKAGES[@]}")"
 
-echo ""
-echo -e "${GREEN}Done. Operators installed in namespace: $NS${NC}"
-echo "  Check: oc get csv -n $NS"
-echo "  Check: oc get pods -n $NS"
+else
+  # --- OLM v0: OperatorGroup + Subscriptions ---
+
+  # OperatorGroup: match rhwa_testing_data.sh — metadata only, no spec.
+  # OLM requires exactly one OperatorGroup per namespace; it may auto-create one (e.g. openshift-workload-availability-xxxx).
+  # Keep only our canonical one so "found 2 operatorGroups, expected 1" does not block installs.
+  og_name=workload-availability-operator-group
+  for extra_og in $(oc get operatorgroup -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+    if [[ -n "$extra_og" && "$extra_og" != "$og_name" ]]; then
+      echo -e "${YELLOW}Removing extra OperatorGroup $extra_og (OLM allows only one per namespace)${NC}"
+      oc delete operatorgroup "$extra_og" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null || true
+    fi
+  done
+  if ! oc get operatorgroup "$og_name" -n "$NS" &>/dev/null; then
+    echo -e "${YELLOW}Creating OperatorGroup in $NS${NC}"
+    jq -n --arg name "$og_name" --arg ns "$NS" \
+      '{apiVersion:"operators.coreos.com/v1",kind:"OperatorGroup",metadata:{name:$name,namespace:$ns}}' \
+      | oc apply -f -
+  fi
+
+  # Yields e.g. nhc-operator-operator for pkgs ending in -operator — cosmetic, not worth renaming (breaks existing clusters)
+  for pkg in "${PACKAGES[@]}"; do
+    sub_name="${pkg}-operator"
+    if oc get subscription "$sub_name" -n "$NS" &>/dev/null; then
+      echo "  Subscription $sub_name already exists, patching channel to $CHANNEL"
+      _sub_patch=$(jq -n --arg ch "$CHANNEL" '{"spec":{"channel":$ch}}')
+      oc patch subscription "$sub_name" -n "$NS" --type=merge -p "$_sub_patch"
+    else
+      echo "  Creating Subscription for $pkg (channel: $CHANNEL)"
+      _sub_json=$(jq -n \
+        --arg name "$sub_name" \
+        --arg ns "$NS" \
+        --arg channel "$CHANNEL" \
+        --arg approval "$APPROVAL" \
+        --arg pkg "$pkg" \
+        --arg catsrc "$CATSRC" \
+        --arg catsrcNs "$CATSRC_NS" \
+        '{
+          apiVersion: "operators.coreos.com/v1alpha1",
+          kind: "Subscription",
+          metadata: {name: $name, namespace: $ns},
+          spec: {channel: $channel, installPlanApproval: $approval, name: $pkg, source: $catsrc, sourceNamespace: $catsrcNs}
+        }')
+      echo "$_sub_json" | oc apply -f -
+    fi
+  done
+
+  if [[ "$WAIT" == "true" ]]; then
+    echo ""
+    echo -e "${YELLOW}Waiting for all operator CSVs to reach Succeeded (timeout 15m each)...${NC}"
+    for pkg in "${PACKAGES[@]}"; do
+      start_ts=$(date +%s)
+      timeout_s=900
+      while true; do
+        csv_name=$(oc get csv -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "^${pkg}\." | head -1 || true)
+        if [[ -n "${csv_name:-}" ]]; then
+          phase=$(oc get csv -n "$NS" "$csv_name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if [[ "$phase" == "Succeeded" ]]; then
+            echo "  $pkg: $csv_name (Succeeded)"
+            break
+          fi
+          if [[ "$phase" == "Failed" ]]; then
+            echo -e "  ${RED}$pkg: $csv_name phase=Failed${NC}" >&2
+          fi
+        fi
+        if (( $(date +%s) - start_ts > timeout_s )); then
+          echo -e "${RED}Timeout waiting for $pkg CSV${NC}" >&2
+          exit 1
+        fi
+        sleep 5
+      done
+    done
+    echo -e "${GREEN}All operator CSVs Succeeded.${NC}"
+  fi
+
+  # Optionally enable NHC console plugin (only if NHC is in PACKAGES)
+  if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG} "* ]]; then
+    echo ""
+    echo -e "${YELLOW}Enabling NHC console plugin: $NHC_CONSOLE_PLUGIN_NAME${NC}"
+    if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null 2>&1; then
+      echo "  ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found yet (NHC operator may still be deploying it)."
+    fi
+    # spec.plugins lives on operator.openshift.io/v1 Console, not config.openshift.io
+    if oc get console.operator.openshift.io cluster -o name &>/dev/null 2>&1; then
+      current=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins[*]}' 2>/dev/null || echo "")
+      if echo "$current" | tr ' ' '\n' | grep -q "^${NHC_CONSOLE_PLUGIN_NAME}$"; then
+        echo "  Plugin $NHC_CONSOLE_PLUGIN_NAME already enabled in Console."
+      else
+        if oc patch console.operator.openshift.io cluster --type=json -p "[{\"op\":\"add\",\"path\":\"/spec/plugins/-\",\"value\":\"${NHC_CONSOLE_PLUGIN_NAME}\"}]" 2>/dev/null; then
+          echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console."
+        else
+          oc patch console.operator.openshift.io cluster --type=merge -p "{\"spec\":{\"plugins\":[\"${NHC_CONSOLE_PLUGIN_NAME}\"]}}" 2>/dev/null && echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console." || echo "  Could not patch Console (plugin may need to be enabled manually)."
+        fi
+      fi
+    else
+      echo "  Console.operator.openshift.io cluster not found; skip plugin enable."
+    fi
+  fi
+
+  # Remove duplicate subscriptions for the same package. OLM can create the long-named one
+  # (e.g. self-node-remediation-stable-redhat-operators-openshift-marketplace). Run twice
+  # and use a temp file so we don't miss any (no subshell from pipe).
+  echo -e "\n${YELLOW}Removing duplicate subscriptions (keep only <package>-operator)...${NC}"
+  _subs_tmp=$(mktemp)
+  for _pass in 1 2; do
+    [[ $_pass -eq 2 ]] && sleep 3
+    oc get subscription -n "$NS" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.name}{"\n"}{end}' 2>/dev/null > "$_subs_tmp" || true
+    while read -r sub_meta_name spec_name; do
+      [[ -z "$sub_meta_name" ]] && continue
+      # Is this one of our packages?
+      found=""
+      for pkg in "${ALL_PACKAGES[@]}"; do
+        if [[ "$spec_name" == "$pkg" ]]; then
+          canonical="${pkg}-operator"
+          if [[ "$sub_meta_name" != "$canonical" ]]; then
+            oc delete subscription "$sub_meta_name" -n "$NS" --ignore-not-found --timeout=30s 2>/dev/null && echo "  Deleted duplicate subscription: $sub_meta_name" || true
+          fi
+          break
+        fi
+      done
+    done < "$_subs_tmp" 2>/dev/null || true
+  done
+
+  # Optionally enable NHC console plugin (only if NHC is in PACKAGES)
+  if [[ "$ENABLE_NHC_PLUGIN" == "true" ]] && [[ " ${PACKAGES[*]} " == *" ${NHC_PKG} "* ]]; then
+    echo ""
+    echo -e "${YELLOW}Enabling NHC console plugin: $NHC_CONSOLE_PLUGIN_NAME${NC}"
+    if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
+      echo "  Waiting for ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME (up to ${NHC_CONSOLE_PLUGIN_WAIT}s)..."
+      _cp_deadline=$(( $(date +%s) + NHC_CONSOLE_PLUGIN_WAIT ))
+      while (( $(date +%s) < _cp_deadline )); do
+        oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null && break
+        sleep 5
+      done
+    fi
+    if ! oc get consoleplugin "$NHC_CONSOLE_PLUGIN_NAME" &>/dev/null; then
+      echo -e "  ${RED}ConsolePlugin $NHC_CONSOLE_PLUGIN_NAME not found after ${NHC_CONSOLE_PLUGIN_WAIT}s — skipping plugin enable.${NC}" >&2
+    elif oc get console.operator.openshift.io cluster -o name &>/dev/null; then
+      current_json=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null || echo "[]")
+      if echo "$current_json" | jq -e --arg p "$NHC_CONSOLE_PLUGIN_NAME" 'index($p) != null' &>/dev/null; then
+        echo "  Plugin $NHC_CONSOLE_PLUGIN_NAME already enabled in Console."
+      else
+        new_plugins=$(echo "$current_json" | jq --arg p "$NHC_CONSOLE_PLUGIN_NAME" \
+          'if type == "array" then . + [$p] | unique else [$p] end')
+        patch_json=$(jq -n --argjson plugins "$new_plugins" '{"spec":{"plugins":$plugins}}')
+        if oc patch console.operator.openshift.io cluster --type=merge -p "$patch_json" 2>/dev/null; then
+          echo "  Enabled $NHC_CONSOLE_PLUGIN_NAME in Console."
+        else
+          echo "  Could not patch Console (plugin may need to be enabled manually)."
+        fi
+      fi
+    else
+      echo "  Console.operator.openshift.io cluster not found; skip plugin enable."
+    fi
+  fi
+
+  echo ""
+  echo -e "${GREEN}Done. Operators installed in namespace: $NS${NC}"
+  echo "  Check: oc get csv -n $NS"
+  echo "  Check: oc get pods -n $NS"
+fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers for RHWA helper_scripts (catalog wait, pull-secret merge, ClusterCatalog).
-# Sourced by install_rhwa_operators.sh and sync_clustercatalog_from_catalogsource.sh — do not execute directly.
+# Sourced by install_rhwa_operators.sh and deploy_iib.sh — do not execute directly.
 
 [[ -n "${_RHWA_UTILS_SOURCED:-}" ]] && return 0
 _RHWA_UTILS_SOURCED=1
@@ -18,20 +18,8 @@ rhwa_wait_catsrc_ready() {
   fi
 }
 
-rhwa_merge_catsrc_pull_secrets_into_global() {
-  local catsrc="$1" catsrc_ns="$2"
-  local -a secrets=()
-  local sec merged_changed=false
-
-  while IFS= read -r sec; do
-    [[ -n "$sec" ]] && secrets+=("$sec")
-  done < <(oc get catalogsource "$catsrc" -n "$catsrc_ns" \
-    -o jsonpath='{range .spec.secrets[*]}{.}{"\n"}{end}' 2>/dev/null || true)
-
-  if [[ ${#secrets[@]} -eq 0 ]]; then
-    echo "CatalogSource ${catsrc} has no spec.secrets; skipping global pull-secret merge."
-    return 0
-  fi
+rhwa_merge_secret_file_into_global() {
+  local secret_file="$1" label="${2:-secret file}"
 
   command -v jq >/dev/null || {
     echo "Error: jq required to merge pull secrets into global pull-secret" >&2
@@ -49,59 +37,91 @@ rhwa_merge_catsrc_pull_secrets_into_global() {
 
   oc extract secret/pull-secret -n openshift-config --to="$tmpdir" --confirm >/dev/null 2>&1 \
     || return 1
-  cp "$tmpdir/.dockerconfigjson" "$tmpdir/merged.json"
 
+  local before after
+  before=$(jq -r '.auths | keys | length' "$tmpdir/.dockerconfigjson")
+  jq -s '
+    (.[0].auths) as $existing |
+    (.[1].auths) as $incoming |
+    $existing + ($incoming | with_entries(select(.key as $k | ($existing | has($k)) | not)))
+    | {auths: .}
+  ' "$tmpdir/.dockerconfigjson" "$secret_file" > "$tmpdir/merged.json"
+  after=$(jq -r '.auths | keys | length' "$tmpdir/merged.json")
+
+  if [[ "$after" -le "$before" ]]; then
+    echo "Global pull-secret already includes registries from ${label}."
+    return 0
+  fi
+
+  echo "Merging ${label} into global pull-secret (+$((after - before)) registry entries)."
+  local backup_path="${HOME}/pull-secret-backup-$(date +%s).yaml"
+  local -a old_backups=()
+  (umask 077; oc get secret pull-secret -n openshift-config -o yaml > "$backup_path")
+  mapfile -t old_backups < <(ls -1t "${HOME}"/pull-secret-backup-*.yaml 2>/dev/null || true)
+  local _i
+  for ((_i = 3; _i < ${#old_backups[@]}; _i++)); do
+    rm -f "${old_backups[_i]}"
+  done
+  echo "Backup saved to ${backup_path} (mode 600). Restore with: oc apply -f ${backup_path}"
+  if ! oc set data secret/pull-secret -n openshift-config \
+    --from-file=.dockerconfigjson="$tmpdir/merged.json" >/dev/null; then
+    echo "Error: failed to update pull-secret; restoring from backup..." >&2
+    if ! oc apply -f "$backup_path" >/dev/null 2>&1; then
+      echo "Error: restore failed — manually restore: oc apply -f ${backup_path}" >&2
+    fi
+    return 1
+  fi
+  echo "Updated openshift-config/pull-secret."
+  if oc get deployment catalogd-controller-manager -n openshift-catalogd &>/dev/null; then
+    oc rollout restart deployment/catalogd-controller-manager -n openshift-catalogd >/dev/null
+    echo "Restarted catalogd deployment to pick up pull credentials."
+  fi
+  return 0
+}
+
+rhwa_merge_catsrc_pull_secrets_into_global() {
+  local catsrc="$1" catsrc_ns="$2"
+  local -a secrets=()
+  local sec
+
+  while IFS= read -r sec; do
+    [[ -n "$sec" ]] && secrets+=("$sec")
+  done < <(oc get catalogsource "$catsrc" -n "$catsrc_ns" \
+    -o jsonpath='{range .spec.secrets[*]}{.}{"\n"}{end}' 2>/dev/null || true)
+
+  if [[ ${#secrets[@]} -eq 0 ]]; then
+    echo "CatalogSource ${catsrc} has no spec.secrets; skipping global pull-secret merge."
+    return 0
+  fi
+
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "${tmpdir:-}"' RETURN
+
+  # Accumulate all CatalogSource secrets into a single merged file, then apply once
+  local accumulated="$tmpdir/accumulated.json"
+  echo '{"auths":{}}' > "$accumulated"
+
+  local found=0
   for sec in "${secrets[@]}"; do
     if ! oc get secret "$sec" -n "$catsrc_ns" &>/dev/null; then
       echo "Warning: CatalogSource secret ${sec} not found in ${catsrc_ns}; skipping." >&2
       continue
     fi
-    local before after
-    before=$(jq -r '.auths | keys | length' "$tmpdir/merged.json")
     oc get secret "$sec" -n "$catsrc_ns" -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d \
       > "$tmpdir/${sec}.json"
-    jq -s '
-      (.[0].auths) as $existing |
-      (.[1].auths) as $incoming |
-      $existing + ($incoming | with_entries(select(.key as $k | ($existing | has($k)) | not)))
-      | {auths: .}
-    ' "$tmpdir/merged.json" "$tmpdir/${sec}.json" > "$tmpdir/merged.next.json"
-    mv "$tmpdir/merged.next.json" "$tmpdir/merged.json"
-    after=$(jq -r '.auths | keys | length' "$tmpdir/merged.json")
-    if [[ "$after" -gt "$before" ]]; then
-      merged_changed=true
-      echo "Merged ${sec} (${catsrc_ns}) into global pull-secret (+$((after - before)) registry entries)."
-    else
-      echo "Global pull-secret already includes registries from ${sec}."
-    fi
+    jq -s '.[0].auths + .[1].auths | {auths: .}' "$accumulated" "$tmpdir/${sec}.json" \
+      > "$tmpdir/merged-acc.json"
+    mv "$tmpdir/merged-acc.json" "$accumulated"
+    found=1
   done
 
-  if [[ "$merged_changed" == "true" ]]; then
-    local backup_path="${HOME}/pull-secret-backup-$(date +%s).yaml"
-    local -a old_backups=()
-    (umask 077; oc get secret pull-secret -n openshift-config -o yaml > "$backup_path")
-    mapfile -t old_backups < <(ls -1t "${HOME}"/pull-secret-backup-*.yaml 2>/dev/null || true)
-    local _i
-    for ((_i = 3; _i < ${#old_backups[@]}; _i++)); do
-      rm -f "${old_backups[_i]}"
-    done
-    echo "Backup saved to ${backup_path} (mode 600). Restore with: oc apply -f ${backup_path}"
-    echo "Older pull-secret backups in \$HOME are auto-pruned (keeping the 3 most recent)."
-    if ! oc set data secret/pull-secret -n openshift-config \
-      --from-file=.dockerconfigjson="$tmpdir/merged.json" >/dev/null; then
-      echo "Error: failed to update pull-secret; restoring from backup..." >&2
-      if ! oc apply -f "$backup_path" >/dev/null 2>&1; then
-        echo "Error: restore failed — manually restore: oc apply -f ${backup_path}" >&2
-      fi
-      return 1
-    fi
-    echo "Updated openshift-config/pull-secret."
-    if oc get deployment catalogd-controller-manager -n openshift-catalogd &>/dev/null; then
-      oc rollout restart deployment/catalogd-controller-manager -n openshift-catalogd >/dev/null
-      echo "Restarted catalogd deployment to pick up pull credentials."
-    fi
+  if [[ "$found" -eq 0 ]]; then
+    echo "No valid secrets found for CatalogSource ${catsrc}; skipping."
+    return 0
   fi
-  return 0
+
+  rhwa_merge_secret_file_into_global "$accumulated" "CatalogSource ${catsrc} secrets (${catsrc_ns})"
 }
 
 rhwa_wait_clustercatalog_serving() {

@@ -15,13 +15,13 @@ flowchart LR
 |------|--------|-------------|
 | 1 | `helper_scripts/deploy_iib.sh` | Deploy a brew/IIB CatalogSource (+ optional IDMS). Skip if the catalog already exists. |
 | 2 | `helper_scripts/sync_clustercatalog_from_catalogsource.sh` | OLM v1 clusters: align `ClusterCatalog` with the CatalogSource and merge brew pull secrets. Skip on classic OLM-only clusters. |
-| 3 | `helper_scripts/install_rhwa_operators.sh` | Install all six RHWA operators via Subscriptions. Use `--create-idms` when testing disconnected/Konflux mirrors. |
+| 3 | `helper_scripts/install_rhwa_operators.sh` | Install all six RHWA operators. OLM v0 (default): Subscriptions. OLM v1: `--olm v1` for ClusterExtension. Use `--create-idms` when testing disconnected/Konflux mirrors. |
 
 Shared helpers live in `helper_scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret merge, ClusterCatalog Serving wait).
 
 **IDMS note:** IDMS is only needed when installing operators from unverified/brew catalogs (IIB). The default `redhat-operators` catalog does not require IDMS.
 
-### Example: OCP 5.x nightly with brew catalog
+### Example: OLM v0 (classic OLM) with brew IIB catalog
 
 ```bash
 # 1. Deploy IIB catalog (optional if catalog already present)
@@ -37,6 +37,18 @@ Shared helpers live in `helper_scripts/lib/rhwa_utils.sh` (catalog wait, pull-se
   --catsrc rhwa-iib-1141449 \
   --catsrc-ns openshift-operators \
   --create-idms
+```
+
+### Example: OLM v1 (ClusterExtension) with brew IIB catalog
+
+```bash
+# 1. Deploy IIB as ClusterCatalog directly
+./helper_scripts/deploy_iib.sh 1141449 --olm v1 --convert-secret
+
+# 2. Install operators via ClusterExtension
+./helper_scripts/install_rhwa_operators.sh \
+  --olm v1 \
+  --catsrc rhwa-iib-1141449
 ```
 
 ### Example: connected cluster with redhat-operators
