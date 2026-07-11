@@ -22,9 +22,8 @@ The repo layout is:
   - `deploy_iib.sh` — deploy a brew/IIB CatalogSource (+ optional IDMS)
   - `install_rhwa_operators.sh` — install RHWA operators via classic OLM (optional IDMS generation)
   - `remove_rhwa_operators.sh` — uninstall RHWA operators (subs, CSVs, CRs, CRDs, OLM v1 extensions)
-  - `sync_clustercatalog_from_catalogsource.sh` — align OLMv1 `ClusterCatalog` with a `CatalogSource`
   - `lib/rhwa_utils.sh` — shared catalog helpers (sourced by the scripts above; not run directly)
-  - See [cluster setup workflow](docs/rhwa_cluster_setup_workflow.md), [install doc](docs/helper_scripts/install_rhwa_operator.md), [remove doc](docs/helper_scripts/remove_rhwa_operators.md), and [sync doc](docs/helper_scripts/sync_clustercatalog_from_catalogsource.md)
+  - See [cluster setup workflow](docs/rhwa_cluster_setup_workflow.md), [install doc](docs/helper_scripts/install_rhwa_operator.md), and [remove doc](docs/helper_scripts/remove_rhwa_operators.md)
 
 ## How to Manually Update RPMs
 
