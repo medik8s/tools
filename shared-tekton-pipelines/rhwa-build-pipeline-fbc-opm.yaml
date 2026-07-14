@@ -13,64 +13,64 @@ spec:
     _Uses `buildah` to create a container image. Its build-time tests are limited to verifying the included catalog and do not scan the image.
     This pipeline is pushed as a Tekton bundle to [quay.io](https://quay.io/repository/konflux-ci/tekton-catalog/pipeline-fbc-builder?tab=tags)_
   finally:
-    - name: slack-webhook-notification-on-pr-failure
-      params: # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
-        - name: message
-          value: (pull) PipelineRun _$(context.pipelineRun.name)_ *Failed* :failed
-        - name: secret-name
-          value: slack-webhhok-rhwa
-        - name: key-name
-          value: slack-webhook
-      taskRef:
-        params:
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
-          - name: name
-            value: slack-webhook-notification
-          - name: kind
-            value: Task
-        resolver: bundles
-      when:
-        - input: $(tasks.status)
-          operator: in
-          values: ["Failed"]
-        - input: $(params.is_pull_request)
-          operator: in
-          values: ["true"]
-    - name: slack-webhook-notification-on-push
-      params: # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
-        - name: message
-          value: PipelineRun _$(context.pipelineRun.name)_ *$(tasks.status)*
-        - name: secret-name
-          value: slack-webhhok-rhwa
-        - name: key-name
-          value: slack-webhook
-      taskRef:
-        params:
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
-          - name: name
-            value: slack-webhook-notification
-          - name: kind
-            value: Task
-        resolver: bundles
-      when:
-        - input: $(params.is_pull_request)
-          operator: in
-          values: ["false"]
-    - name: show-sbom
+  - name: slack-webhook-notification-on-pr-failure
+    params:   # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
+    - name: message
+      value: (pull) PipelineRun _$(context.pipelineRun.name)_ *Failed* :failed
+    - name: secret-name
+      value: slack-webhhok-rhwa
+    - name: key-name
+      value: slack-webhook
+    taskRef:
       params:
-        - name: IMAGE_URL
-          value: $(tasks.build-image-index.results.IMAGE_URL)
-      taskRef:
-        params:
-          - name: name
-            value: show-sbom
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-show-sbom:0.1@sha256:8fe70a95c28b1ac92abd67a7477ad960218f3f570a9f8a12ad082dff7e9c9579
-          - name: kind
-            value: task
-        resolver: bundles
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
+      - name: name
+        value: slack-webhook-notification
+      - name: kind
+        value: Task
+      resolver: bundles
+    when:
+    - input: $(tasks.status)
+      operator: in
+      values: ["Failed"]
+    - input: $(params.is_pull_request)
+      operator: in
+      values: ["true"]
+  - name: slack-webhook-notification-on-push
+    params:   # https://github.com/konflux-ci/build-definitions/blob/main/task/slack-webhook-notification/0.1/slack-webhook-notification.yaml#L13-L30
+    - name: message
+      value: PipelineRun _$(context.pipelineRun.name)_ *$(tasks.status)*
+    - name: secret-name
+      value: slack-webhhok-rhwa
+    - name: key-name
+      value: slack-webhook
+    taskRef:
+      params:
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-slack-webhook-notification:0.1@sha256:02842e9c752056c47a409f69ed462cfd38cbd6b15facb796564a610b549222ea
+      - name: name
+        value: slack-webhook-notification
+      - name: kind
+        value: Task
+      resolver: bundles
+    when:
+    - input: $(params.is_pull_request)
+      operator: in
+      values: ["false"]
+  - name: show-sbom
+    params:
+    - name: IMAGE_URL
+      value: $(tasks.build-image-index.results.IMAGE_URL)
+    taskRef:
+      params:
+      - name: name
+        value: show-sbom
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-show-sbom:0.1@sha256:8fe70a95c28b1ac92abd67a7477ad960218f3f570a9f8a12ad082dff7e9c9579
+      - name: kind
+        value: task
+      resolver: bundles
   params:
   - description: Source Repository URL
     name: git-url
@@ -83,13 +83,11 @@ spec:
     name: output-image
     type: string
   - default: .
-    description: Path to the source code of an application's component from where
-      to build image.
+    description: Path to the source code of an application's component from where to build image.
     name: path-context
     type: string
   - default: Dockerfile
-    description: Path to the Dockerfile inside the context specified by parameter
-      path-context
+    description: Path to the Dockerfile inside the context specified by parameter path-context
     name: dockerfile
     type: string
   - default: "false"
@@ -105,8 +103,7 @@ spec:
     name: prefetch-input
     type: string
   - default: ""
-    description: Image tag expiration time, time values could be something like 1h,
-      2d, 3w for hours, days, and weeks, respectively.
+    description: Image tag expiration time, time values could be something like 1h, 2d, 3w for hours, days, and weeks, respectively.
     name: image-expires-after
     type: string
   - default: "true"
@@ -126,8 +123,7 @@ spec:
     type: string
   - default:
     - linux/x86_64
-    description: List of platforms to build the container images on. The available
-      set of values is determined by the configuration of the multi-platform-controller.
+    description: List of platforms to build the container images on. The available set of values is determined by the configuration of the multi-platform-controller.
     name: build-platforms
     type: array
   - description: Identify whether the PipelineRun is a pull_request or push tekton file
@@ -160,14 +156,14 @@ spec:
     - name: enable-cache-proxy
       value: $(params.enable-cache-proxy)
     taskRef:
-        params:
-          - name: name
-            value: init
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-init:0.4@sha256:5a423246792ac501ea279229b42ee57da9927da441c04b5c9ff86817b0856b08
-          - name: kind
-            value: task
-        resolver: bundles
+      params:
+      - name: name
+        value: init
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-init:0.4@sha256:5a423246792ac501ea279229b42ee57da9927da441c04b5c9ff86817b0856b08
+      - name: kind
+        value: task
+      resolver: bundles
   - name: clone-repository
     params:
     - name: url
@@ -181,27 +177,27 @@ spec:
     runAfter:
     - init
     taskRef:
-        params:
-          - name: name
-            value: git-clone-oci-ta
-          - name: bundle
-            value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.2@sha256:e5ba1f8549e6a0f043629ef00bea7511957121e05304b688f40ff12304560f38
-          - name: kind
-            value: task
-        resolver: bundles
+      params:
+      - name: name
+        value: git-clone-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.2@sha256:e5ba1f8549e6a0f043629ef00bea7511957121e05304b688f40ff12304560f38
+      - name: kind
+        value: task
+      resolver: bundles
     workspaces:
     - name: basic-auth
       workspace: git-auth
   - name: run-opm-command
     params:
     - name: SOURCE_ARTIFACT
-      value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+      value: $(tasks.fbc-inject-lifecycle.results.SOURCE_ARTIFACT)
     - name: ociStorage
       value: $(params.output-image).opm
     - name: ociArtifactExpiresAfter
       value: $(params.image-expires-after)
     - name: OPM_ARGS
-      value: 
+      value:
       - alpha
       - render-template
       - basic
@@ -212,15 +208,15 @@ spec:
     - name: IDMS_PATH
       value: ".tekton/images-mirror-set.yaml"
     runAfter:
-    - clone-repository
+    - fbc-inject-lifecycle
     taskRef:
       params:
-        - name: name
-          value: run-opm-command-oci-ta
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-run-opm-command-oci-ta:0.1@sha256:a4865bdefb5c74eec6ee5a4919ed6ab9da723326455f34a33f03e590c8f5ae77
-        - name: kind
-          value: task
+      - name: name
+        value: run-opm-command-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-run-opm-command-oci-ta:0.1@sha256:a4865bdefb5c74eec6ee5a4919ed6ab9da723326455f34a33f03e590c8f5ae77
+      - name: kind
+        value: task
       resolver: bundles
   - name: prefetch-dependencies
     params:
@@ -292,12 +288,12 @@ spec:
     - clone-repository
     taskRef:
       params:
-        - name: name
-          value: buildah-remote-oci-ta
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-buildah-remote-oci-ta:0.10@sha256:c77892be9e7217b9baa9abdbaf432c16ee49c30601b6b25cfbc9d704295c58ef
-        - name: kind
-          value: task
+      - name: name
+        value: buildah-remote-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-buildah-remote-oci-ta:0.10@sha256:c77892be9e7217b9baa9abdbaf432c16ee49c30601b6b25cfbc9d704295c58ef
+      - name: kind
+        value: task
       resolver: bundles
     workspaces: []
   - name: build-image-index
@@ -315,12 +311,12 @@ spec:
     - build-images
     taskRef:
       params:
-        - name: name
-          value: build-image-index
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.3@sha256:70c52e88e737340e7b58418fda38c13273aa7cdf587b825778e3560aca1d1133
-        - name: kind
-          value: task
+      - name: name
+        value: build-image-index
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.3@sha256:70c52e88e737340e7b58418fda38c13273aa7cdf587b825778e3560aca1d1133
+      - name: kind
+        value: task
       resolver: bundles
   - name: deprecated-base-image-check
     params:
@@ -332,12 +328,12 @@ spec:
     - build-image-index
     taskRef:
       params:
-        - name: name
-          value: deprecated-image-check
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-deprecated-image-check:0.5@sha256:e78d0d3baf3c8cfc1a5ad278196b74032d9568b143a87c7a79ab780fedfb296e
-        - name: kind
-          value: task
+      - name: name
+        value: deprecated-image-check
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-deprecated-image-check:0.5@sha256:e78d0d3baf3c8cfc1a5ad278196b74032d9568b143a87c7a79ab780fedfb296e
+      - name: kind
+        value: task
       resolver: bundles
     when:
     - input: $(params.skip-checks)
@@ -354,12 +350,12 @@ spec:
     - build-image-index
     taskRef:
       params:
-        - name: name
-          value: apply-tags
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.3@sha256:3ab844157eccd68e95e4852adc06c3c4ea674edb7865a474b0a898227f2893d6
-        - name: kind
-          value: task
+      - name: name
+        value: apply-tags
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.3@sha256:6387614ae4f9efa8abb7c4175db0ce5d958bc2b90665b4704880e46fbe0535bf
+      - name: kind
+        value: task
       resolver: bundles
   - name: validate-fbc
     params:
@@ -371,12 +367,12 @@ spec:
     - build-image-index
     taskRef:
       params:
-        - name: name
-          value: validate-fbc
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-validate-fbc:0.1@sha256:855ac0d3e01755cfcc9854d4e47fed2a655fd7ca259adf4e403ab5b658333313
-        - name: kind
-          value: task
+      - name: name
+        value: validate-fbc
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-validate-fbc:0.2@sha256:f430ab31b170583495ce81beef15a54c8a0910b6eec0836ced4736d43c1aa91c
+      - name: kind
+        value: task
       resolver: bundles
     when:
     - input: $(params.skip-checks)
@@ -397,12 +393,12 @@ spec:
     - validate-fbc
     taskRef:
       params:
-        - name: name
-          value: fbc-target-index-pruning-check
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-fbc-target-index-pruning-check:0.1@sha256:a7696d92734be62700723b6d2c40dfaee4809e6a1d42b28deefc7c7463176c32
-        - name: kind
-          value: task
+      - name: name
+        value: fbc-target-index-pruning-check
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-fbc-target-index-pruning-check:0.1@sha256:a7696d92734be62700723b6d2c40dfaee4809e6a1d42b28deefc7c7463176c32
+      - name: kind
+        value: task
       resolver: bundles
     when:
     - input: $(params.skip-checks)
@@ -421,18 +417,41 @@ spec:
     - build-image-index
     taskRef:
       params:
-        - name: name
-          value: fbc-fips-check-oci-ta
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-fbc-fips-check-oci-ta:0.1@sha256:935adb61a5c9be0f619edc8838771ad3fe08cf17689094aeaaeac493af2a2115
-        - name: kind
-          value: task
+      - name: name
+        value: fbc-fips-check-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-fbc-fips-check-oci-ta:0.1@sha256:935adb61a5c9be0f619edc8838771ad3fe08cf17689094aeaaeac493af2a2115
+      - name: kind
+        value: task
       resolver: bundles
     when:
     - input: $(params.skip-checks)
       operator: in
       values:
       - "false"
+  - name: fbc-inject-lifecycle
+    taskRef:
+      resolver: bundles
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: fbc-inject-lifecycle-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/task-fbc-inject-lifecycle-oci-ta:0.1@sha256:9b6d61e5e887a8f30940c1fed0e118b8974c382d0a6328db99705a44365f6b0b
+    params:
+    - name: DOCKERFILE
+      value: $(params.dockerfile)
+    - name: CONTEXT
+      value: $(params.path-context)
+    - name: SOURCE_ARTIFACT
+      value: $(tasks.clone-repository.results.SOURCE_ARTIFACT)
+    - name: ociStorage
+      value: $(params.output-image).lifecycle
+    - name: ociArtifactExpiresAfter
+      value: $(params.image-expires-after)
+    runAfter:
+    - clone-repository
   workspaces:
   - name: git-auth
     optional: true
