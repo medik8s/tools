@@ -1,4 +1,4 @@
-## helper_scripts/remove_rhwa_operators.sh
+## scripts/remove_rhwa_operators.sh
 
 Remove RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) from all namespaces. Cleans up Subscriptions, CSVs, OLM v1 ClusterExtensions, stale OLM v0 ClusterRoles, custom resources, and CRDs.
 
@@ -7,14 +7,14 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 ### Prerequisites
 
 - `oc login` to the target cluster (or use `--kubeconfig-from` for QE lab hosts).
-- Clone the repo or copy the `helper_scripts/` directory.
+- Clone the repo or copy the `scripts/` directory.
 
 ### Usage
 
 ```bash
-./helper_scripts/remove_rhwa_operators.sh
-./helper_scripts/remove_rhwa_operators.sh --only nhc,far
-./helper_scripts/remove_rhwa_operators.sh --kubeconfig-from root@lab-host.example.com
+./scripts/remove_rhwa_operators.sh
+./scripts/remove_rhwa_operators.sh --only nhc,far
+./scripts/remove_rhwa_operators.sh --kubeconfig-from root@lab-host.example.com
 ```
 
 ### Options
@@ -39,6 +39,6 @@ The `openshift-workload-availability` namespace is left in place for reinstall. 
 ### Re-install after removal
 
 ```bash
-./helper_scripts/remove_rhwa_operators.sh
-./helper_scripts/install_rhwa_operators.sh
+./scripts/remove_rhwa_operators.sh
+./scripts/install_rhwa_operators.sh
 ```

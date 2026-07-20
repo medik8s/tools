@@ -10,10 +10,10 @@
 #   --kubeconfig-path PATH   Remote kubeconfig path when using --kubeconfig-from (default: /root/.kube/config).
 #
 # Usage:
-#   ./helper_scripts/remove_rhwa_operators.sh
-#   ./helper_scripts/remove_rhwa_operators.sh --only far
-#   ./helper_scripts/remove_rhwa_operators.sh --only nhc,snr
-#   ./helper_scripts/remove_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
+#   ./scripts/remove_rhwa_operators.sh
+#   ./scripts/remove_rhwa_operators.sh --only far
+#   ./scripts/remove_rhwa_operators.sh --only nhc,snr
+#   ./scripts/remove_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
 #
 # Requires on PATH: oc
 ################################################################################

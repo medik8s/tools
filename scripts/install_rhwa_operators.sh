@@ -23,21 +23,21 @@
 #   NHC_CONSOLE_PLUGIN_WAIT  Seconds to wait for that CR after CSV install (default: 300)
 #
 # Usage:
-#   ./helper_scripts/install_rhwa_operators.sh
-#   ./helper_scripts/install_rhwa_operators.sh --only snr,nhc
-#   ./helper_scripts/install_rhwa_operators.sh --channel stable-4.12 --catsrc redhat-operators
-#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
-#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from root@192.168.1.10 --only nhc
-#   ./helper_scripts/install_rhwa_operators.sh --kubeconfig-from bastion --kubeconfig-path /home/kni/clusterconfigs/auth/kubeconfig
-#   ./helper_scripts/install_rhwa_operators.sh --catsrc rhwa-konflux-test-1141449 --create-idms
+#   ./scripts/install_rhwa_operators.sh
+#   ./scripts/install_rhwa_operators.sh --only snr,nhc
+#   ./scripts/install_rhwa_operators.sh --channel stable-4.12 --catsrc redhat-operators
+#   ./scripts/install_rhwa_operators.sh --kubeconfig-from my-bastion.example.com
+#   ./scripts/install_rhwa_operators.sh --kubeconfig-from root@192.168.1.10 --only nhc
+#   ./scripts/install_rhwa_operators.sh --kubeconfig-from bastion --kubeconfig-path /home/kni/clusterconfigs/auth/kubeconfig
+#   ./scripts/install_rhwa_operators.sh --catsrc rhwa-konflux-test-1141449 --create-idms
 #
-# Requires helper_scripts/lib/rhwa_utils.sh (sourced from the same directory). Clone or copy the
-#   full helper_scripts/ tree. --create-idms embeds the Konflux mirror map.
+# Requires scripts/lib/rhwa_utils.sh (sourced from the same directory). Clone or copy the
+#   full scripts/ tree. --create-idms embeds the Konflux mirror map.
 #   Requires on PATH: oc, jq. For --create-idms with a custom catalog
 #   while the same packages also exist in redhat/community catalogs, install opm so the script can
 #   opm render the CatalogSource index image and read bundle relatedImages (PackageManifest is ambiguous).
 #
-#   then: ./helper_scripts/install_rhwa_operators.sh --catsrc rhwa-operators --create-idms
+#   then: ./scripts/install_rhwa_operators.sh --catsrc rhwa-operators --create-idms
 #   IDMS YAML is written next to this script: <script-dir>/idms/
 ################################################################################
 

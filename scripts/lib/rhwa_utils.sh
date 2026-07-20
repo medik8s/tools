@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for RHWA helper_scripts (catalog wait, pull-secret merge, ClusterCatalog).
+# Shared helpers for RHWA scripts (catalog wait, pull-secret merge, ClusterCatalog).
 # Sourced by install_rhwa_operators.sh and deploy_iib.sh — do not execute directly.
 
 [[ -n "${_RHWA_UTILS_SOURCED:-}" ]] && return 0
