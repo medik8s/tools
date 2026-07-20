@@ -25,4 +25,5 @@ All automation scripts for RHWA releases, Mintmaker, and cluster setup.
 - [Cluster setup workflow](docs/rhwa_cluster_setup_workflow.md) — end-to-end order
 - [Install operators](docs/install_rhwa_operator.md)
 - [Remove operators](docs/remove_rhwa_operators.md)
+- [RPM lockfile update](docs/rpm_lockfile_update.md) — manual `rpms.lock.yaml` regeneration
 - [RHWA test process](https://docs.google.com/document/d/1E-arB0rzqZzWzI-T5EaKPdEtNRqZjv-xS-BWUB8-Ink/edit?tab=t.xpsj2ngnkrf6#heading=h.6dbvd5b3xqvg)

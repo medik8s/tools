@@ -1,5 +1,10 @@
+workflow:
+  name: 'GitLab CI - $CI_PIPELINE_SOURCE'
+
 shellcheck:
   image: docker.io/koalaman/shellcheck-alpine:stable
+  tags:
+    - itup-alm-x86
   rules:
     - changes:
         - scripts/**/*.sh
