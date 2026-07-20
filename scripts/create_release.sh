@@ -137,7 +137,6 @@ echo "Bundles to release saved in ${bundles_file}"
 
 bundle_count=$(yq '.bundles | length' "${bundles_file}")
 for (( i=0; i<bundle_count; i++ )); do
-    name=$(yq ".bundles[${i}].name" "${bundles_file}")
     operator=$(yq ".bundles[${i}].operator" "${bundles_file}")
     major=$(yq ".bundles[${i}].major" "${bundles_file}")
     minor=$(yq ".bundles[${i}].minor" "${bundles_file}")
