@@ -1,29 +1,49 @@
 # tools
 
-This repo is aimed to include many Dragonfly project files that are common to all.
-The repo layout is:
+This repo includes shared Dragonfly project files common to all RHWA operators.
 
-- `.gitlab/merge_request_templates` directory for Merge Requests (MR) templates across the Dragonfly project.
-- `.tekton` directory for PR and push Tekton PipelineRuns that test the Tekton Pipelines from shared-tekton-pipelines for CI/CD. PR and push files per each image/pipeline we would like to test
-- `containers` directory for dummy containerfiles (of regular and fbc images) that are used in the container build of the Tekton PipelineRuns under `.tekton` directory
-- `releases` directory for Konflux release CRs for each RHWA release
-  - Includes a directory for each RHWA release with Konflux since we have migrated to Konflux (2025).
-  - Includes a script for creating  FBC or non-FBC release YAML.
-    - Option A - Run `./releases/create_release.sh DIR_NAME FBC_APP STAGED_IIB`. Find related snapshots from staged IIB and create release YAMLs (FBC and non-fbc) under `DIR_NAME`.
-    - Option B - Run `./releases/automate_release_yamls.sh usage` for help and view the below examples:
-      - `./releases/automate_release_yamls.sh non-fbc 26.1 sbr-0-1 0 hkncb prod`
-      - `./releases/automate_release_yamls.sh fbc 26.1 4.20 6l6qg prod tp`
-- `shared-tekton-pipelines` directory for the shared Tekton Pipelines which are used in many Dragonfly operators under RHWA product
-- `renovate-config` directory renovate config preset files (see [Inherited Config](https://konflux.pages.redhat.com/docs/users/mintmaker/user.html#inherited-config) and [RHWA-552](https://issues.redhat.com/browse/RHWA-552))
-  - Includes a default preset for RHWA repos with Git Submodules and Containerfiles changes.
-  - Includes a RHWA preset for RHWA repos with RPMs and external packages dependencies.
-- `renovate.json` for Mintmaker/Renovate configuration of automatic MR to update the shared Tekton Pipelines tasks
-- `helper_scripts` directory for cluster helper scripts used by QE and lab workflows:
-  - `deploy_iib.sh` — deploy a brew/IIB CatalogSource (+ optional IDMS)
-  - `install_rhwa_operators.sh` — install RHWA operators via classic OLM (optional IDMS generation)
-  - `remove_rhwa_operators.sh` — uninstall RHWA operators (subs, CSVs, CRs, CRDs, OLM v1 extensions)
-  - `lib/rhwa_utils.sh` — shared catalog helpers (sourced by the scripts above; not run directly)
-  - See [cluster setup workflow](docs/rhwa_cluster_setup_workflow.md), [install doc](docs/helper_scripts/install_rhwa_operator.md), and [remove doc](docs/helper_scripts/remove_rhwa_operators.md)
+## Repo Layout
+
+- `.gitlab/merge_request_templates` — MR templates for the Dragonfly project.
+- `.tekton` — PR and push Tekton PipelineRuns that test the shared pipelines.
+- `containers` — Dummy Containerfiles (regular and FBC) used by the `.tekton` PipelineRuns for CI container builds.
+- `shared-tekton-pipelines` — Shared Tekton Pipelines used across Dragonfly operator repos under RHWA.
+- `rhwa-releases` — Konflux release CRs for each RHWA release, organized by year.
+  - `rhwa-releases/2025/` — Releases from 2025 (rhwa-25.x, hotfixes).
+  - `rhwa-releases/2026/` — Releases from 2026 (rhwa-26.x, rhwa-4.2x).
+- `scripts` — All automation scripts ([README](scripts/README.md)):
+  - **Release:** `create_release.sh`, `tag_downstream.sh` — generate Konflux release YAMLs from staged IIBs and tag downstream GitLab repos.
+  - **Mintmaker:** `mintmaker-toggle.sh`, `mintmaker-config.yaml` — enable or disable Mintmaker (Renovate) on Konflux components per operator and version.
+  - **Cluster setup:** `deploy_iib.sh`, `install_rhwa_operators.sh`, `remove_rhwa_operators.sh` — deploy IIB catalogs and install/remove all six RHWA operators on test clusters.
+  - `lib/` — Shared helpers (catalog wait, pull-secret merge); `docs/` — per-script documentation.
+- `renovate-config` — Renovate config preset files for other RHWA repos (see [Inherited Config](https://konflux.pages.redhat.com/docs/users/mintmaker/user.html#inherited-config) and [RHWA-552](https://issues.redhat.com/browse/RHWA-552)).
+  - `default.json` — Default preset for repos with Git Submodules and Containerfiles.
+  - `rhwa-rpms.json` — Preset for repos with RPMs and external package dependencies.
+- `renovate.json` — Mintmaker config for **this repo** (auto-updates shared Tekton pipeline task digests). Not a preset — see `renovate-config/` for presets.
+
+## Creating Release YAMLs
+
+Run `./scripts/create_release.sh DIR_NAME FBC_APP STAGED_IIB` to find related snapshots from a staged IIB and create release YAMLs (FBC and non-FBC) under `rhwa-releases/`.
+
+Example:
+```bash
+./scripts/create_release.sh hotfix-cap910-420 rhwa-fbc-420-hotfix 1102942
+```
+
+## Tagging Downstream Repos
+
+Run `./scripts/tag_downstream.sh <fbc-app-name>` to resolve source commits from Konflux prod releases and create signed version tags on downstream GitLab repos.
+
+```bash
+./scripts/tag_downstream.sh rhwa-fbc-421
+./scripts/tag_downstream.sh --commits-only rhwa-fbc-421
+```
+
+Override GitLab URLs via environment variables:
+```bash
+export GITLAB_BASE="git@gitlab.example.com:myorg"
+export GITLAB_WEB="https://gitlab.example.com/myorg"
+```
 
 ## How to Manually Update RPMs
 
