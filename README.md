@@ -45,6 +45,20 @@ export GITLAB_BASE="git@gitlab.example.com:myorg"
 export GITLAB_WEB="https://gitlab.example.com/myorg"
 ```
 
-## How to Manually Update RPMs
+## How to Update RPMs
 
-See [RPM lockfile update guide](scripts/docs/rpm_lockfile_update.md).
+Use `scripts/update_rpm_lockfile.sh` to regenerate `rpms.lock.yaml`. Run `scripts/update_rpm_lockfile.sh --help` for full usage.
+
+```bash
+cd /path/to/fence-agents-remediation
+export ACTIVATION_KEY="my-key" ORG_ID="12345"
+export REGISTRY_USER="user" REGISTRY_PASSWORD="pass"
+/path/to/tools/scripts/update_rpm_lockfile.sh \
+  --containerfile Containerfile.fence-agents-remediation \
+  --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350 \
+  --fix-ssl
+```
+
+> **Note:** MintMaker now supports automatic `rpms.lock.yaml` regeneration when bumping base images via the [`refresh-rpm-lockfiles`](https://github.com/konflux-ci/mintmaker-presets) preset ([KONFLUX-11483](https://redhat.atlassian.net/browse/KONFLUX-11483)). The script is needed only when adding/removing packages or troubleshooting.
+
+For multi-architecture builds and manual steps, see [RPM lockfile update guide](scripts/docs/rpm_lockfile_update.md).
