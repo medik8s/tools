@@ -142,8 +142,8 @@ echo "==> Installing subscription-manager from UBI repos..."
 microdnf install -y --disablerepo="*" --enablerepo="ubi-*" subscription-manager
 
 echo "==> Registering with subscription-manager..."
-sed -i "s/if rhsm.config.in_container():/if False:/" \
-  /usr/lib64/python3.9/site-packages/subscription_manager/cli_command/cli.py
+SM_CLI=$(python3 -c "import subscription_manager.cli_command.cli as m; print(m.__file__)")
+sed -i "s/if rhsm.config.in_container():/if False:/" "$SM_CLI"
 subscription-manager register --activationkey="${ACTIVATION_KEY}" --org="${ORG_ID}"
 
 echo "==> Installing tools from RHEL repos..."
@@ -161,7 +161,7 @@ if [[ "${USE_AUTH_FILE}" == "1" ]]; then
   cp /run/containers/0/auth.json "${HOME}/.config/containers/auth.json"
   echo "Using mounted auth file"
 else
-  skopeo login -u "${REGISTRY_USER}" -p "${REGISTRY_PASSWORD}" registry.redhat.io
+  echo "${REGISTRY_PASSWORD}" | skopeo login -u "${REGISTRY_USER}" --password-stdin registry.redhat.io
 fi
 
 echo "==> Generating lockfile..."
@@ -173,7 +173,8 @@ echo "==> Done."
 
 if [[ "$dry_run" == true ]]; then
   echo "Would run:"
-  printf '%q ' "${podman_cmd[@]}"
+  printf '%q ' "${podman_cmd[@]}" | sed -E \
+    's/(ACTIVATION_KEY|ORG_ID|REGISTRY_USER|REGISTRY_PASSWORD)=[^ ]+/\1=***REDACTED***/g'
   echo
   exit 0
 fi
