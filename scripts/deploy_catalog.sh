@@ -497,7 +497,9 @@ while [[ $# -gt 0 ]]; do
         --secret)          [[ $# -lt 2 ]] && { echo "Error: --secret requires a path" >&2; exit 1; }; SECRET_PATH="$2"; shift 2 ;;
         --namespace)       [[ $# -lt 2 ]] && { echo "Error: --namespace requires a value" >&2; exit 1; }; NAMESPACE="$2"; shift 2 ;;
         --fbc-base)        [[ $# -lt 2 ]] && { echo "Error: --fbc-base requires an image path" >&2; exit 1; }; FBC_BASE="$2"; shift 2 ;;
-        --ocp-ver)         [[ $# -lt 2 ]] && { echo "Error: --ocp-ver requires a version" >&2; exit 1; }; OCP_VER="$2"; shift 2 ;;
+        --ocp-ver)         [[ $# -lt 2 ]] && { echo "Error: --ocp-ver requires a version" >&2; exit 1; }
+                           [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: --ocp-ver must be numeric (e.g., 422, 423)" >&2; exit 1; }
+                           OCP_VER="$2"; shift 2 ;;
         --name)            [[ $# -lt 2 ]] && { echo "Error: --name requires a value" >&2; exit 1; }; CATSRC_NAME_OVERRIDE="$2"; shift 2 ;;
         -h|--help)         usage ;;
         -*)                echo "Unknown option: $1"; usage ;;
@@ -519,7 +521,7 @@ if [[ "${INPUT}" =~ ^[0-9]+$ ]]; then
     IMAGE="brew.registry.redhat.io/rh-osbs/iib:${INPUT}"
     CATSRC_NAME="${CATSRC_NAME_OVERRIDE:-rhwa-iib-${INPUT}}"
     DISPLAY_NAME="RHWA IIB ${INPUT}"
-elif [[ "${INPUT}" =~ ^sha256: ]]; then
+elif [[ "${INPUT}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
     MODE="fbc"
     FBC_BASE="${FBC_BASE:-quay.io/redhat-user-workloads/rhwa-tenant/rhwa-fbc/rhwa-fbc-${OCP_VER}}"
     IMAGE="${FBC_BASE}@${INPUT}"
