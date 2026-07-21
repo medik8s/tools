@@ -360,7 +360,7 @@ rhwa_create_idms_from_catsrc() {
     _mirrors_json=$(echo "$_mirrors_json" | jq --arg src "$s" --arg mir "${mirror_entries[$s]}" \
       '. + [{"mirrors": [$mir], "source": $src}]')
   done
-  # Intentionally same name as deploy_iib.sh IDMS — --create-idms supersedes it with live catalog data
+  # Intentionally same name as deploy_catalog.sh IDMS — --create-idms supersedes it with live catalog data
   local _timestamp
   _timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   jq -n \

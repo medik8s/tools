@@ -14,7 +14,7 @@ This repo includes shared Dragonfly project files common to all RHWA operators.
 - `scripts` — All automation scripts ([README](scripts/README.md)):
   - **Release:** `create_release.sh`, `tag_downstream.sh` — generate Konflux release YAMLs from staged IIBs and tag downstream GitLab repos.
   - **Mintmaker:** `mintmaker-toggle.sh`, `mintmaker-config.yaml` — enable or disable Mintmaker (Renovate) on Konflux components per operator and version.
-  - **Cluster setup:** `deploy_iib.sh`, `install_rhwa_operators.sh`, `remove_rhwa_operators.sh` — deploy IIB catalogs and install/remove all six RHWA operators on test clusters.
+  - **Cluster setup:** `deploy_catalog.sh`, `install_rhwa_operators.sh`, `remove_rhwa_operators.sh` — deploy operator catalogs (IIB or FBC) and install/remove all six RHWA operators on test clusters.
   - `lib/` — Shared helpers (catalog wait, pull-secret merge); `docs/` — per-script documentation.
 - `renovate-config` — Renovate config preset files for other RHWA repos (see [Inherited Config](https://konflux.pages.redhat.com/docs/users/mintmaker/user.html#inherited-config) and [RHWA-552](https://issues.redhat.com/browse/RHWA-552)).
   - `default.json` — Default preset for repos with Git Submodules and Containerfiles.
