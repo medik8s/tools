@@ -52,7 +52,6 @@ Use `scripts/update_rpm_lockfile.sh` to regenerate `rpms.lock.yaml`. Run `script
 ```bash
 cd /path/to/fence-agents-remediation
 export ACTIVATION_KEY="my-key" ORG_ID="12345"
-export REGISTRY_USER="user" REGISTRY_PASSWORD="pass"
 /path/to/tools/scripts/update_rpm_lockfile.sh \
   --containerfile Containerfile.fence-agents-remediation \
   --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350 \
