@@ -1,0 +1,4 @@
+requests>=2.32
+markdown>=3.7
+docopt-ng>=0.9.0
+pytest>=8.0
