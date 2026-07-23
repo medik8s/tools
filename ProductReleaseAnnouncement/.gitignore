@@ -1,0 +1,6 @@
+release.md
+release.html
+release-slack.txt
+venv/
+__pycache__/
+.pytest_cache/
