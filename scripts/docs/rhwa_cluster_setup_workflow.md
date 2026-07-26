@@ -12,7 +12,7 @@ flowchart LR
 
 | Step | Script | When to use |
 |------|--------|-------------|
-| 1 | `scripts/deploy_catalog.sh` | Deploy an operator catalog (IIB or FBC fragment). Use `--olm v1` for ClusterCatalog. Skip if the catalog already exists. |
+| 1 | `scripts/deploy_catalog.sh` | Deploy an operator catalog (FBC fragment or IIB build). Use `--olm v1` for ClusterCatalog. Skip if the catalog already exists. |
 | 2 | `scripts/install_rhwa_operators.sh` | Install all six RHWA operators. OLM v0 (default): Subscriptions. OLM v1: `--olm v1` for ClusterExtension. Use `--create-idms` when testing disconnected/Konflux mirrors. |
 
 Shared helpers live in `scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret merge, ClusterCatalog Serving wait).

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Deploy an operator catalog on an OpenShift cluster (e.g., Cluster Bot AWS).
-# Supports IIB index images (by number) and FBC fragment images (by digest).
+# Supports FBC fragment images (by digest) and IIB builds (by ID).
 # Supports OLM v0 (CatalogSource) and OLM v1 (ClusterCatalog).
 # Run with -h for usage.
 
@@ -25,14 +25,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rhwa_utils.sh"
 
 usage() {
     cat <<'EOF'
-Usage: deploy_catalog.sh <IIB_NUMBER | sha256:DIGEST> [OPTIONS]
+Usage: deploy_catalog.sh <sha256:DIGEST | IIB_BUILD_ID> [OPTIONS]
 
 Deploy an operator catalog on an OpenShift cluster.
-Supports IIB index images (by number) and FBC fragment images (by digest).
+Supports FBC fragment images (by digest) and IIB builds (by ID).
 
 Arguments:
-  IIB_NUMBER              IIB build number (e.g., 1181614)
   sha256:DIGEST           FBC image digest (e.g., sha256:abc123...)
+  IIB_BUILD_ID            IIB build ID (e.g., 1181614)
 
 Options:
   --olm v0|v1             OLM version: v0 creates CatalogSource (default),
@@ -513,7 +513,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -z "${INPUT}" ]] && { echo "Error: IIB_NUMBER or sha256:DIGEST is required"; usage; }
+[[ -z "${INPUT}" ]] && { echo "Error: sha256:DIGEST or IIB_BUILD_ID is required"; usage; }
 
 # Detect mode and derive IMAGE, CATSRC_NAME, DISPLAY_NAME
 if [[ "${INPUT}" =~ ^[0-9]+$ ]]; then
@@ -528,7 +528,7 @@ elif [[ "${INPUT}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
     CATSRC_NAME="${CATSRC_NAME_OVERRIDE:-rhwa-fbc-${OCP_VER}}"
     DISPLAY_NAME="RHWA FBC ${OCP_VER}"
 else
-    echo "Error: argument must be an IIB number (numeric) or FBC digest (sha256:...)" >&2
+    echo "Error: argument must be an FBC digest (sha256:...) or IIB build ID (numeric)" >&2
     echo "  Got: ${INPUT}" >&2
     exit 1
 fi
