@@ -47,14 +47,23 @@ export GITLAB_WEB="https://gitlab.example.com/myorg"
 
 ## How to Update RPMs
 
-Use `scripts/update_rpm_lockfile.sh` to regenerate `rpms.lock.yaml`. Run `scripts/update_rpm_lockfile.sh --help` for full usage.
+Use `scripts/update_rpm_lockfile.sh` to regenerate `rpms.lock.yaml` for any RHWA operator. Run `scripts/update_rpm_lockfile.sh --help` for full usage.
 
 ```bash
-cd /path/to/fence-agents-remediation
 export ACTIVATION_KEY="my-key" ORG_ID="12345"
+
+# FAR
+cd /path/to/fence-agents-remediation
 /path/to/tools/scripts/update_rpm_lockfile.sh \
   --containerfile Containerfile.fence-agents-remediation \
   --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350 \
+  --fix-ssl
+
+# SBR
+cd /path/to/storage-based-remediation
+/path/to/tools/scripts/update_rpm_lockfile.sh \
+  --containerfile Containerfile.storage-based-remediation \
+  --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.8-1784705586 \
   --fix-ssl
 ```
 

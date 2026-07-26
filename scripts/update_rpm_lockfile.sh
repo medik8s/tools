@@ -33,12 +33,18 @@ Environment:
 
 Run from the operator repo root (where Containerfile and rpms.in.yaml live).
 
-Example:
+Examples:
   cd /path/to/fence-agents-remediation
   export ACTIVATION_KEY="my-key" ORG_ID="12345"
   /path/to/tools/scripts/update_rpm_lockfile.sh \
     --containerfile Containerfile.fence-agents-remediation \
     --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.6-1755695350 \
+    --fix-ssl
+
+  cd /path/to/storage-based-remediation
+  /path/to/tools/scripts/update_rpm_lockfile.sh \
+    --containerfile Containerfile.storage-based-remediation \
+    --base-image registry.access.redhat.com/ubi9/ubi-minimal:9.8-1784705586 \
     --fix-ssl
 
 See scripts/docs/rpm_lockfile_update.md for background and multi-arch instructions.
