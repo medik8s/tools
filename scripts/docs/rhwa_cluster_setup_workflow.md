@@ -6,13 +6,13 @@ End-to-end order for deploying RHWA operators from internal IIB or Konflux catal
 
 ```mermaid
 flowchart LR
-  A[deploy_iib.sh] --> B[install_rhwa_operators.sh]
+  A[deploy_catalog.sh] --> B[install_rhwa_operators.sh]
   B -.->|uninstall| C[remove_rhwa_operators.sh]
 ```
 
 | Step | Script | When to use |
 |------|--------|-------------|
-| 1 | `scripts/deploy_iib.sh` | Deploy a brew/IIB CatalogSource (+ optional IDMS). Use `--olm v1` for ClusterCatalog. Skip if the catalog already exists. |
+| 1 | `scripts/deploy_catalog.sh` | Deploy an operator catalog (FBC fragment or IIB build). Use `--olm v1` for ClusterCatalog. Skip if the catalog already exists. |
 | 2 | `scripts/install_rhwa_operators.sh` | Install all six RHWA operators. OLM v0 (default): Subscriptions. OLM v1: `--olm v1` for ClusterExtension. Use `--create-idms` when testing disconnected/Konflux mirrors. |
 
 Shared helpers live in `scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret merge, ClusterCatalog Serving wait).
@@ -23,7 +23,7 @@ Shared helpers live in `scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret me
 
 ```bash
 # 1. Deploy IIB catalog
-./scripts/deploy_iib.sh 1141449 --convert-secret
+./scripts/deploy_catalog.sh 1141449 --convert-secret
 
 # 2. Install operators (add --create-idms for Konflux mirror mapping)
 ./scripts/install_rhwa_operators.sh \
@@ -36,7 +36,7 @@ Shared helpers live in `scripts/lib/rhwa_utils.sh` (catalog wait, pull-secret me
 
 ```bash
 # 1. Deploy IIB as ClusterCatalog directly
-./scripts/deploy_iib.sh 1141449 --olm v1 --convert-secret
+./scripts/deploy_catalog.sh 1141449 --olm v1 --convert-secret
 
 # 2. Install operators via ClusterExtension
 ./scripts/install_rhwa_operators.sh \

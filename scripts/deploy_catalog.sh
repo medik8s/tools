@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy an IIB catalog on an OpenShift cluster (e.g., Cluster Bot AWS).
+# Deploy an operator catalog on an OpenShift cluster (e.g., Cluster Bot AWS).
+# Supports FBC fragment images (by digest) and IIB builds (by ID).
 # Supports OLM v0 (CatalogSource) and OLM v1 (ClusterCatalog).
 # Run with -h for usage.
 
 NAMESPACE="openshift-operators"
-CATSRC_PREFIX="rhwa-iib"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRET_DEFAULT_PATH="${SCRIPT_DIR}/secrets/brew-pull-secret.yaml"
 IDMS_RAW_URL="https://gitlab.cee.redhat.com/api/v4/projects/dragonfly%2Frhwa-fbc/repository/files/.tekton%2Fimages-mirror-set.yaml/raw?ref=main"
@@ -16,29 +16,40 @@ APPLY_IDMS=true
 CONVERT_SECRET=false
 SECRET_PATH=""
 OLM_VERSION="v0"
+FBC_BASE=""
+OCP_VER="422"
+CATSRC_NAME_OVERRIDE=""
 
 # shellcheck source=lib/rhwa_utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rhwa_utils.sh"
 
 usage() {
     cat <<'EOF'
-Usage: deploy_iib.sh <IIB_NUMBER> [OPTIONS]
+Usage: deploy_catalog.sh <sha256:DIGEST | IIB_BUILD_ID> [OPTIONS]
 
-Deploy an IIB catalog on an OpenShift cluster.
+Deploy an operator catalog on an OpenShift cluster.
+Supports FBC fragment images (by digest) and IIB builds (by ID).
 
 Arguments:
-  IIB_NUMBER              The IIB number (e.g., 1102943)
+  sha256:DIGEST           FBC image digest (e.g., sha256:abc123...)
+  IIB_BUILD_ID            IIB build ID (e.g., 1181614)
 
 Options:
   --olm v0|v1             OLM version: v0 creates CatalogSource (default),
                            v1 creates ClusterCatalog directly
   --no-idms               Skip applying IDMS (applied by default)
   --convert-secret        Convert pull secret from registry.redhat.io to brew.registry.redhat.io
-  --cleanup               Remove the catalog and secret for this IIB
+  --cleanup               Remove the catalog and secret for this catalog
   --dry-run               Print commands without executing them
   --secret <PATH>         Path to brew pull secret YAML (default: scripts/secrets/brew-pull-secret.yaml)
   --namespace <NS>        Target namespace for v0 CatalogSource (default: openshift-operators)
+  --name <NAME>           Override the auto-derived catalog name
   -h, --help              Show this help
+
+FBC options (only used with sha256:DIGEST):
+  --fbc-base <IMAGE>      Base FBC image path
+                           (default: quay.io/redhat-user-workloads/rhwa-tenant/rhwa-fbc/rhwa-fbc-<ocp-ver>)
+  --ocp-ver <VER>         OCP version suffix for --fbc-base default and catalog name (default: 422)
 
 Prerequisites:
   1. oc login to target cluster
@@ -48,6 +59,19 @@ Prerequisites:
      If the secret targets registry.redhat.io, use --convert-secret to
      automatically convert it to brew.registry.redhat.io
   3. GITLAB_PRIVATE_TOKEN env var (for fetching IDMS from private rhwa-fbc repo, skip with --no-idms)
+
+Examples:
+  # Deploy FBC fragment directly:
+  deploy_catalog.sh sha256:abc123def456... --ocp-ver 422
+
+  # Deploy FBC with custom base image:
+  deploy_catalog.sh sha256:abc123... --fbc-base quay.io/my-org/my-fbc
+
+  # Deploy FBC with custom catalog name:
+  deploy_catalog.sh sha256:abc123... --name my-test-catalog
+
+  # Deploy from IIB build ID (legacy):
+  deploy_catalog.sh 1181614 --convert-secret
 
 OLM v0 (default): creates CatalogSource + namespace pull secret + SA patch
 OLM v1 (--olm v1): creates ClusterCatalog + merges pull secret into global pull-secret
@@ -124,7 +148,7 @@ ERRMSG
 # --- OLM v0 functions ---
 
 cleanup_v0() {
-    echo "Cleaning up IIB ${IIB_NR} (OLM v0)..."
+    echo "Cleaning up catalog ${CATSRC_NAME} (OLM v0)..."
 
     if [[ "${DRY_RUN}" == "false" ]] && oc get catalogsource "${CATSRC_NAME}" -n "${NAMESPACE}" &>/dev/null; then
         echo "Deleting CatalogSource '${CATSRC_NAME}'..."
@@ -154,11 +178,10 @@ MSG
 }
 
 create_catalogsource() {
-    local image="brew.registry.redhat.io/rh-osbs/iib:${IIB_NR}"
-    echo "Creating CatalogSource '${CATSRC_NAME}' with image ${image}..."
+    echo "Creating CatalogSource '${CATSRC_NAME}' with image ${IMAGE}..."
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[dry-run] oc apply -f - (CatalogSource ${CATSRC_NAME}, image: ${image})"
+        echo "[dry-run] oc apply -f - (CatalogSource ${CATSRC_NAME}, image: ${IMAGE})"
     else
         oc apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
@@ -167,9 +190,9 @@ metadata:
   name: ${CATSRC_NAME}
   namespace: ${NAMESPACE}
 spec:
-  displayName: RHWA IIB ${IIB_NR}
+  displayName: ${DISPLAY_NAME}
   sourceType: grpc
-  image: ${image}
+  image: ${IMAGE}
 EOF
     fi
 }
@@ -206,11 +229,12 @@ patch_service_account() {
 }
 
 deploy_v0() {
-    echo "=== Deploying IIB ${IIB_NR} (OLM v0) ==="
+    echo "=== Deploying catalog ${CATSRC_NAME} (OLM v0) ==="
+    echo "  Mode: ${MODE}, Image: ${IMAGE}"
     if [[ "${DRY_RUN}" == "false" ]]; then
-        echo "Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+        echo "  Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     fi
-    echo "Namespace: ${NAMESPACE}"
+    echo "  Namespace: ${NAMESPACE}"
     echo ""
 
     if [[ "${CONVERT_SECRET}" == "true" ]]; then
@@ -251,7 +275,7 @@ deploy_v0() {
 
     cat <<MSG
 
-=== IIB ${IIB_NR} deployed successfully (OLM v0) ===
+=== Catalog ${CATSRC_NAME} deployed successfully (OLM v0) ===
 
 Verify with:
   oc get catalogsource ${CATSRC_NAME} -n ${NAMESPACE}
@@ -262,7 +286,7 @@ MSG
 # --- OLM v1 functions ---
 
 cleanup_v1() {
-    echo "Cleaning up IIB ${IIB_NR} (OLM v1)..."
+    echo "Cleaning up catalog ${CATSRC_NAME} (OLM v1)..."
 
     if [[ "${DRY_RUN}" == "false" ]] && oc get clustercatalog "${CATSRC_NAME}" &>/dev/null; then
         echo "Deleting ClusterCatalog '${CATSRC_NAME}'..."
@@ -282,13 +306,12 @@ MSG
 }
 
 create_clustercatalog() {
-    local image="brew.registry.redhat.io/rh-osbs/iib:${IIB_NR}"
-    echo "Creating ClusterCatalog '${CATSRC_NAME}' with image ${image}..."
+    echo "Creating ClusterCatalog '${CATSRC_NAME}' with image ${IMAGE}..."
 
     local manifest
     manifest=$(jq -n \
         --arg name "$CATSRC_NAME" \
-        --arg ref "$image" \
+        --arg ref "$IMAGE" \
         '{
             apiVersion: "olm.operatorframework.io/v1",
             kind: "ClusterCatalog",
@@ -333,9 +356,10 @@ merge_pull_secret_to_global() {
 }
 
 deploy_v1() {
-    echo "=== Deploying IIB ${IIB_NR} (OLM v1) ==="
+    echo "=== Deploying catalog ${CATSRC_NAME} (OLM v1) ==="
+    echo "  Mode: ${MODE}, Image: ${IMAGE}"
     if [[ "${DRY_RUN}" == "false" ]]; then
-        echo "Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
+        echo "  Cluster: $(oc whoami --show-server 2>/dev/null || echo 'unknown')"
     fi
     echo ""
 
@@ -365,7 +389,7 @@ deploy_v1() {
 
     cat <<MSG
 
-=== IIB ${IIB_NR} deployed successfully (OLM v1) ===
+=== Catalog ${CATSRC_NAME} deployed successfully (OLM v1) ===
 
 Verify with:
   oc get clustercatalog ${CATSRC_NAME}
@@ -454,7 +478,7 @@ main() {
 # --- Argument parsing ---
 [[ $# -eq 0 ]] && usage
 
-IIB_NR=""
+INPUT=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --olm)
@@ -472,11 +496,16 @@ while [[ $# -gt 0 ]]; do
         --dry-run)         DRY_RUN=true; shift ;;
         --secret)          [[ $# -lt 2 ]] && { echo "Error: --secret requires a path" >&2; exit 1; }; SECRET_PATH="$2"; shift 2 ;;
         --namespace)       [[ $# -lt 2 ]] && { echo "Error: --namespace requires a value" >&2; exit 1; }; NAMESPACE="$2"; shift 2 ;;
+        --fbc-base)        [[ $# -lt 2 ]] && { echo "Error: --fbc-base requires an image path" >&2; exit 1; }; FBC_BASE="$2"; shift 2 ;;
+        --ocp-ver)         [[ $# -lt 2 ]] && { echo "Error: --ocp-ver requires a version" >&2; exit 1; }
+                           [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: --ocp-ver must be numeric (e.g., 422, 423)" >&2; exit 1; }
+                           OCP_VER="$2"; shift 2 ;;
+        --name)            [[ $# -lt 2 ]] && { echo "Error: --name requires a value" >&2; exit 1; }; CATSRC_NAME_OVERRIDE="$2"; shift 2 ;;
         -h|--help)         usage ;;
         -*)                echo "Unknown option: $1"; usage ;;
         *)
-            if [[ -z "${IIB_NR}" ]]; then
-                IIB_NR="$1"; shift
+            if [[ -z "${INPUT}" ]]; then
+                INPUT="$1"; shift
             else
                 echo "Unexpected argument: $1"; usage
             fi
@@ -484,10 +513,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -z "${IIB_NR}" ]] && { echo "Error: IIB_NUMBER is required"; usage; }
-[[ "${IIB_NR}" =~ ^[0-9]+$ ]] || { echo "Error: IIB_NUMBER must be numeric, got: ${IIB_NR}" >&2; exit 1; }
+[[ -z "${INPUT}" ]] && { echo "Error: sha256:DIGEST or IIB_BUILD_ID is required"; usage; }
 
-CATSRC_NAME="${CATSRC_PREFIX}-${IIB_NR}"
+# Detect mode and derive IMAGE, CATSRC_NAME, DISPLAY_NAME
+if [[ "${INPUT}" =~ ^[0-9]+$ ]]; then
+    MODE="iib"
+    IMAGE="brew.registry.redhat.io/rh-osbs/iib:${INPUT}"
+    CATSRC_NAME="${CATSRC_NAME_OVERRIDE:-rhwa-iib-${INPUT}}"
+    DISPLAY_NAME="RHWA IIB ${INPUT}"
+elif [[ "${INPUT}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    MODE="fbc"
+    FBC_BASE="${FBC_BASE:-quay.io/redhat-user-workloads/rhwa-tenant/rhwa-fbc/rhwa-fbc-${OCP_VER}}"
+    IMAGE="${FBC_BASE}@${INPUT}"
+    CATSRC_NAME="${CATSRC_NAME_OVERRIDE:-rhwa-fbc-${OCP_VER}}"
+    DISPLAY_NAME="RHWA FBC ${OCP_VER}"
+else
+    echo "Error: argument must be an FBC digest (sha256:...) or IIB build ID (numeric)" >&2
+    echo "  Got: ${INPUT}" >&2
+    exit 1
+fi
+
 SECRET_PATH="${SECRET_PATH:-${SECRET_DEFAULT_PATH}}"
 
 main
