@@ -1,5 +1,6 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "description": "Mintmaker/Renovate config for the dragonfly/tools repo. For shared presets used by other repos, see renovate-config/.",
     "tekton": {
         "description": "Schedule on weekdays at night (10 PM - 4 AM) and anytime on weekends",
         "schedule": [

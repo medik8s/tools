@@ -36,13 +36,13 @@ Options:
   --convert-secret        Convert pull secret from registry.redhat.io to brew.registry.redhat.io
   --cleanup               Remove the catalog and secret for this IIB
   --dry-run               Print commands without executing them
-  --secret <PATH>         Path to brew pull secret YAML (default: helper_scripts/secrets/brew-pull-secret.yaml)
+  --secret <PATH>         Path to brew pull secret YAML (default: scripts/secrets/brew-pull-secret.yaml)
   --namespace <NS>        Target namespace for v0 CatalogSource (default: openshift-operators)
   -h, --help              Show this help
 
 Prerequisites:
   1. oc login to target cluster
-  2. Pull secret YAML at helper_scripts/secrets/brew-pull-secret.yaml
+  2. Pull secret YAML at scripts/secrets/brew-pull-secret.yaml
      Get from: https://access.redhat.com/terms-based-registry/
      Create a service account and download the OpenShift secret YAML.
      If the secret targets registry.redhat.io, use --convert-secret to
@@ -372,7 +372,7 @@ Verify with:
   oc describe clustercatalog ${CATSRC_NAME}${idms_note}
 
 Next: install operators with:
-  ./helper_scripts/install_rhwa_operators.sh --olm v1 --catsrc ${CATSRC_NAME}
+  ./scripts/install_rhwa_operators.sh --olm v1 --catsrc ${CATSRC_NAME}
 MSG
 }
 

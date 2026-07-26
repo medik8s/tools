@@ -23,6 +23,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELEASES_DIR="${SCRIPT_DIR}/../rhwa-releases"
 
 expected_cluster_name="stone-prod-p02"
 rhwa_namespace="rhwa-tenant"
@@ -33,6 +34,11 @@ if [[ "$cluster_name" != *"$expected_cluster_name"* ]]; then
     echo "Error: not logged in to correct cluster: $cluster_name"
     exit 1
 fi
+
+_create_release_cleanup() {
+    rm -rf "${tmp_dir:-}" "${bundles_file:-}" "${SCRIPT_DIR}/fbc_to_release.yaml"
+}
+trap _create_release_cleanup EXIT
 
 echo "Heads up, you need to be logged in with podman to quay.io/redhat-user-workloads!"
 
@@ -86,7 +92,7 @@ echo "Found matching release ${fbc_release} with snaphot ${fbc_snapshot}"
 fbc_image=$(oc -n ${rhwa_namespace} get snapshots ${fbc_snapshot} -o yaml | yq '.spec.components.[]'.containerImage)
 
 # Extract /configs from the FBC image
-tmp_dir=$(mktemp -d -p "${SCRIPT_DIR}")
+tmp_dir=$(mktemp -d)
 container_id=$(podman create "${fbc_image}")
 podman cp "${container_id}:/configs" "${tmp_dir}/configs"
 podman rm "${container_id}"
@@ -106,7 +112,7 @@ for dir in "${tmp_dir}/configs"/*/; do
 
     while IFS= read -r -u 3 bundle_name; do
         [[ -z "$bundle_name" || "$bundle_name" == "---" ]] && continue
-        read -p "Create release YAML for ${bundle_name}? [y/N] " answer
+        read -rp "Create release YAML for ${bundle_name}? [y/N] " answer
         if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
             bundle_image=$(yq "select(.schema == \"olm.bundle\" and .name == \"${bundle_name}\") | .image" "${catalog_file}")
             operator="${bundle_name%%.*}"
@@ -131,7 +137,6 @@ echo "Bundles to release saved in ${bundles_file}"
 
 bundle_count=$(yq '.bundles | length' "${bundles_file}")
 for (( i=0; i<bundle_count; i++ )); do
-    name=$(yq ".bundles[${i}].name" "${bundles_file}")
     operator=$(yq ".bundles[${i}].operator" "${bundles_file}")
     major=$(yq ".bundles[${i}].major" "${bundles_file}")
     minor=$(yq ".bundles[${i}].minor" "${bundles_file}")
@@ -195,7 +200,7 @@ for (( i=0; i<bundle_count; i++ )); do
 done
 
 # Create release manifests
-mkdir -p "${SCRIPT_DIR}/${release_name}"
+mkdir -p "${RELEASES_DIR}/${release_name}"
 
 # Operator releases
 bundle_count=$(yq '.bundles | length' "${bundles_file}")
@@ -209,7 +214,7 @@ for (( i=0; i<bundle_count; i++ )); do
 
     manifest_name="${operator_short}-${major}-${minor}-${patch}-prod"
     manifest_name="${manifest_name,,}"
-    cat > "${SCRIPT_DIR}/${release_name}/${manifest_name}.yaml" <<EOF
+    cat > "${RELEASES_DIR}/${release_name}/${manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
@@ -226,7 +231,7 @@ spec:
           - id: REPLACE_ME
             source: issues.redhat.com
 EOF
-    echo "Created ${SCRIPT_DIR}/${release_name}/${manifest_name}.yaml"
+    echo "Created ${RELEASES_DIR}/${release_name}/${manifest_name}.yaml"
 done
 
 # FBC catalog release
@@ -236,7 +241,7 @@ fbc_release_plan=$(yq '.fbc_release_plan' "${SCRIPT_DIR}/fbc_to_release.yaml" | 
 timestamp=$(date +%Y%m%d-%H%M)
 fbc_manifest_name="${release_name}-${fbc_name}-prod-${timestamp}"
 fbc_manifest_name="${fbc_manifest_name,,}"
-cat > "${SCRIPT_DIR}/${release_name}/${fbc_manifest_name}.yaml" <<EOF
+cat > "${RELEASES_DIR}/${release_name}/${fbc_manifest_name}.yaml" <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
@@ -247,5 +252,5 @@ spec:
   snapshot: ${fbc_snapshot}
 EOF
 
-echo "Created ${SCRIPT_DIR}/${release_name}/${fbc_manifest_name}.yaml"
+echo "Created ${RELEASES_DIR}/${release_name}/${fbc_manifest_name}.yaml"
 echo "add Jira issues as needed!"

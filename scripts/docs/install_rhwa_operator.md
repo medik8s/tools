@@ -1,4 +1,4 @@
-## helper_scripts/install_rhwa_operators.sh
+## scripts/install_rhwa_operators.sh
 
 Install RHWA operators (NHC, SNR, NMO, MDR, FAR, SBR) on an OCP cluster. Tested on Clusterbot, BM, and HyperShift. Supports OLM v0 (Subscriptions, default) and OLM v1 (ClusterExtension). With `--create-idms`, the script can generate and apply an ImageDigestMirrorSet from a custom catalog source.
 
@@ -7,7 +7,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 ### Prerequisites
 
 - A working OCP cluster (Clusterbot, BM lab, etc.) and `oc login`.
-- Clone the repo or copy the full `helper_scripts/` directory (includes `lib/rhwa_utils.sh`, which `install_rhwa_operators.sh` sources).
+- Clone the repo or copy the full `scripts/` directory (includes `lib/rhwa_utils.sh`, which `install_rhwa_operators.sh` sources).
 - Tools on PATH:
   - `oc` — always required
   - `jq` — always required
@@ -16,7 +16,7 @@ See also: [cluster setup workflow](../rhwa_cluster_setup_workflow.md).
 ### Help output
 
 ```
-$ ./helper_scripts/install_rhwa_operators.sh --help
+$ ./scripts/install_rhwa_operators.sh --help
 ################################################################################
 Install all 6 RHWA operators: NHC, SNR, NMO, MDR, FAR, SBR.
 
@@ -49,7 +49,7 @@ Environment:
 Run from the repo root:
 
 ```bash
-./helper_scripts/install_rhwa_operators.sh
+./scripts/install_rhwa_operators.sh
 ```
 
 Defaults: `channel=stable`, `catsrc=redhat-operators`, `namespace=openshift-workload-availability`, `approval=Automatic`, NHC console plugin enabled.
@@ -65,8 +65,8 @@ Common flags:
 ### Re-install after removal
 
 ```bash
-./helper_scripts/remove_rhwa_operators.sh
-./helper_scripts/install_rhwa_operators.sh
+./scripts/remove_rhwa_operators.sh
+./scripts/install_rhwa_operators.sh
 ```
 
 For more options, see the Usage section in the script header.

@@ -1,0 +1,27 @@
+workflow:
+  name: 'GitLab CI - $CI_PIPELINE_SOURCE'
+
+shellcheck:
+  image: docker.io/koalaman/shellcheck-alpine:stable
+  tags:
+    - itup-alm-x86
+  rules:
+    - changes:
+        - scripts/**/*.sh
+        - .gitlab-ci.yml
+  script:
+    - find scripts -name '*.sh' | sort | tee /tmp/scripts.txt
+    - echo "---"
+    - |
+      FAILED=0
+      while IFS= read -r script; do
+        echo "Checking ${script}"
+        if ! shellcheck -x -S warning "${script}"; then
+          FAILED=1
+        fi
+      done < /tmp/scripts.txt
+      if [ "$FAILED" -eq 1 ]; then
+        echo "shellcheck found issues"
+        exit 1
+      fi
+      echo "All scripts passed shellcheck"

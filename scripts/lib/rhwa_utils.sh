@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for RHWA helper_scripts (catalog wait, pull-secret merge, ClusterCatalog).
+# Shared helpers for RHWA scripts (catalog wait, pull-secret merge, ClusterCatalog).
 # Sourced by install_rhwa_operators.sh and deploy_iib.sh — do not execute directly.
 
 [[ -n "${_RHWA_UTILS_SOURCED:-}" ]] && return 0
@@ -54,7 +54,8 @@ rhwa_merge_secret_file_into_global() {
   fi
 
   echo "Merging ${label} into global pull-secret (+$((after - before)) registry entries)."
-  local backup_path="${HOME}/pull-secret-backup-$(date +%s).yaml"
+  local backup_path
+  backup_path="${HOME}/pull-secret-backup-$(date +%s).yaml"
   local -a old_backups=()
   (umask 077; oc get secret pull-secret -n openshift-config -o yaml > "$backup_path")
   mapfile -t old_backups < <(ls -1t "${HOME}"/pull-secret-backup-*.yaml 2>/dev/null || true)

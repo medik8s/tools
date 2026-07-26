@@ -31,8 +31,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 expected_cluster_name="stone-prod-p02"
 rhwa_namespace="rhwa-tenant"
-gitlab_base="git@gitlab.cee.redhat.com:dragonfly"
-gitlab_web="https://gitlab.cee.redhat.com/dragonfly"
+gitlab_base="${GITLAB_BASE:-git@gitlab.cee.redhat.com:dragonfly}"
+gitlab_web="${GITLAB_WEB:-https://gitlab.cee.redhat.com/dragonfly}"
 
 COMMITS_ONLY=false
 FBC_APP=""
