@@ -61,9 +61,6 @@ Prerequisites:
   3. GITLAB_PRIVATE_TOKEN env var (for fetching IDMS from private rhwa-fbc repo, skip with --no-idms)
 
 Examples:
-  # Deploy from IIB (legacy):
-  deploy_catalog.sh 1181614 --convert-secret
-
   # Deploy FBC fragment directly:
   deploy_catalog.sh sha256:abc123def456... --ocp-ver 422
 
@@ -72,6 +69,9 @@ Examples:
 
   # Deploy FBC with custom catalog name:
   deploy_catalog.sh sha256:abc123... --name my-test-catalog
+
+  # Deploy from IIB build ID (legacy):
+  deploy_catalog.sh 1181614 --convert-secret
 
 OLM v0 (default): creates CatalogSource + namespace pull secret + SA patch
 OLM v1 (--olm v1): creates ClusterCatalog + merges pull secret into global pull-secret
