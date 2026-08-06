@@ -1,0 +1,15 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: mdr-0-7-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: mdr-0-7-releaseplan-prod
+  snapshot: mdr-0-7-20260728-020959-000
+  data:
+    releaseNotes:
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1382
+            source: issues.redhat.com

@@ -1,0 +1,15 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: far-0-8-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: far-0-8-releaseplan-prod
+  snapshot: far-0-8-20260728-015852-000
+  data:
+    releaseNotes:
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1381
+            source: issues.redhat.com
