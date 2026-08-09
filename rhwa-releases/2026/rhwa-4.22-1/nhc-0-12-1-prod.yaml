@@ -8,4 +8,4 @@ spec:
   snapshot: nhc-0-12-20260728-015522-000
   data:
     releaseNotes:
-      type: RHEA
+      type: RHBA

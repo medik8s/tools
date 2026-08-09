@@ -9,7 +9,3 @@ spec:
   data:
     releaseNotes:
       type: RHBA
-      issues:
-        fixed:
-          - id: REPLACE_ME
-            source: issues.redhat.com
