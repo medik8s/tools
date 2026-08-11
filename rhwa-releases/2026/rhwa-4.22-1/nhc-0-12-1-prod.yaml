@@ -8,4 +8,35 @@ spec:
   snapshot: nhc-0-12-20260728-015522-000
   data:
     releaseNotes:
-      type: RHBA
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1451
+            source: issues.redhat.com
+          - id: RHWA-1455
+            source: issues.redhat.com
+          - id: RHWA-1463
+            source: issues.redhat.com
+          - id: RHWA-1466
+            source: issues.redhat.com
+          - id: RHWA-1474
+            source: issues.redhat.com
+          - id: RHWA-1480
+            source: issues.redhat.com
+          - id: RHWA-1487
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: nhc-operator-0-12
+      - key: CVE-2026-33814
+        component: nhc-operator-0-12
+      - key: CVE-2026-39820
+        component: nhc-operator-0-12
+      - key: CVE-2026-42499
+        component: nhc-operator-0-12
+      - key: CVE-2026-25681
+        component: nhc-operator-0-12
+      - key: CVE-2026-27136
+        component: nhc-operator-0-12
+      - key: CVE-2026-39821
+        component: nhc-operator-0-12

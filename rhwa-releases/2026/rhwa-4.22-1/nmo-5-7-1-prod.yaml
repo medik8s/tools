@@ -8,4 +8,35 @@ spec:
   snapshot: nmo-5-7-20260728-015844-000
   data:
     releaseNotes:
-      type: RHBA
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1449
+            source: issues.redhat.com
+          - id: RHWA-1454
+            source: issues.redhat.com
+          - id: RHWA-1460
+            source: issues.redhat.com
+          - id: RHWA-1468
+            source: issues.redhat.com
+          - id: RHWA-1472
+            source: issues.redhat.com
+          - id: RHWA-1479
+            source: issues.redhat.com
+          - id: RHWA-1485
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: nmo-operator-5-7
+      - key: CVE-2026-33814
+        component: nmo-operator-5-7
+      - key: CVE-2026-39820
+        component: nmo-operator-5-7
+      - key: CVE-2026-42499
+        component: nmo-operator-5-7
+      - key: CVE-2026-25681
+        component: nmo-operator-5-7
+      - key: CVE-2026-27136
+        component: nmo-operator-5-7
+      - key: CVE-2026-39821
+        component: nmo-operator-5-7

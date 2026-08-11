@@ -13,3 +13,42 @@ spec:
         fixed:
           - id: RHWA-1381
             source: issues.redhat.com
+          - id: RHWA-1442
+            source: issues.redhat.com
+          - id: RHWA-1444
+            source: issues.redhat.com
+          - id: RHWA-1448
+            source: issues.redhat.com
+          - id: RHWA-1453
+            source: issues.redhat.com
+          - id: RHWA-1461
+            source: issues.redhat.com
+          - id: RHWA-1469
+            source: issues.redhat.com
+          - id: RHWA-1473
+            source: issues.redhat.com
+          - id: RHWA-1481
+            source: issues.redhat.com
+          - id: RHWA-1483
+            source: issues.redhat.com
+          - id: RHWA-1484
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: far-operator-0-8
+      - key: CVE-2026-33814
+        component: far-operator-0-8
+      - key: CVE-2026-39820
+        component: far-operator-0-8
+      - key: CVE-2026-42499
+        component: far-operator-0-8
+      - key: CVE-2026-25681
+        component: far-operator-0-8
+      - key: CVE-2026-27136
+        component: far-operator-0-8
+      - key: CVE-2026-39821
+        component: far-operator-0-8
+      - key: CVE-2026-33186
+        component: far-operator-0-8
+      - key: CVE-2026-39883
+        component: far-operator-0-8
