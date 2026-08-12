@@ -1,0 +1,44 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: snr-0-13-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: snr-0-13-releaseplan-prod
+  snapshot: snr-0-13-20260728-015746-000
+  data:
+    releaseNotes:
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1026
+            source: issues.redhat.com
+          - id: RHWA-1446
+            source: issues.redhat.com
+          - id: RHWA-1452
+            source: issues.redhat.com
+          - id: RHWA-1458
+            source: issues.redhat.com
+          - id: RHWA-1465
+            source: issues.redhat.com
+          - id: RHWA-1475
+            source: issues.redhat.com
+          - id: RHWA-1478
+            source: issues.redhat.com
+          - id: RHWA-1488
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: snr-operator-0-13
+      - key: CVE-2026-33814
+        component: snr-operator-0-13
+      - key: CVE-2026-39820
+        component: snr-operator-0-13
+      - key: CVE-2026-42499
+        component: snr-operator-0-13
+      - key: CVE-2026-25681
+        component: snr-operator-0-13
+      - key: CVE-2026-27136
+        component: snr-operator-0-13
+      - key: CVE-2026-39821
+        component: snr-operator-0-13

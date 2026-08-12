@@ -1,0 +1,44 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: mdr-0-7-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: mdr-0-7-releaseplan-prod
+  snapshot: mdr-0-7-20260728-020959-000
+  data:
+    releaseNotes:
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1382
+            source: issues.redhat.com
+          - id: RHWA-1450
+            source: issues.redhat.com
+          - id: RHWA-1457
+            source: issues.redhat.com
+          - id: RHWA-1462
+            source: issues.redhat.com
+          - id: RHWA-1467
+            source: issues.redhat.com
+          - id: RHWA-1471
+            source: issues.redhat.com
+          - id: RHWA-1477
+            source: issues.redhat.com
+          - id: RHWA-1489
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: mdr-operator-0-7
+      - key: CVE-2026-33814
+        component: mdr-operator-0-7
+      - key: CVE-2026-39820
+        component: mdr-operator-0-7
+      - key: CVE-2026-42499
+        component: mdr-operator-0-7
+      - key: CVE-2026-25681
+        component: mdr-operator-0-7
+      - key: CVE-2026-27136
+        component: mdr-operator-0-7
+      - key: CVE-2026-39821
+        component: mdr-operator-0-7

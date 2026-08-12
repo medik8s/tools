@@ -1,0 +1,54 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Release
+metadata:
+  name: sbr-0-3-1-prod
+  namespace: rhwa-tenant
+spec:
+  releasePlan: sbr-0-3-releaseplan-prod
+  snapshot: sbr-0-3-20260728-020547-000
+  data:
+    releaseNotes:
+      type: RHSA
+      issues:
+        fixed:
+          - id: RHWA-1068
+            source: issues.redhat.com
+          - id: RHWA-1443
+            source: issues.redhat.com
+          - id: RHWA-1445
+            source: issues.redhat.com
+          - id: RHWA-1447
+            source: issues.redhat.com
+          - id: RHWA-1456
+            source: issues.redhat.com
+          - id: RHWA-1459
+            source: issues.redhat.com
+          - id: RHWA-1464
+            source: issues.redhat.com
+          - id: RHWA-1470
+            source: issues.redhat.com
+          - id: RHWA-1476
+            source: issues.redhat.com
+          - id: RHWA-1482
+            source: issues.redhat.com
+          - id: RHWA-1486
+            source: issues.redhat.com
+      cves:
+      - key: CVE-2026-33811
+        component: sbr-operator-0-3
+      - key: CVE-2026-33814
+        component: sbr-operator-0-3
+      - key: CVE-2026-39820
+        component: sbr-operator-0-3
+      - key: CVE-2026-42499
+        component: sbr-operator-0-3
+      - key: CVE-2026-25681
+        component: sbr-operator-0-3
+      - key: CVE-2026-27136
+        component: sbr-operator-0-3
+      - key: CVE-2026-39821
+        component: sbr-operator-0-3
+      - key: CVE-2026-33186
+        component: sbr-operator-0-3
+      - key: CVE-2026-39883
+        component: sbr-operator-0-3
