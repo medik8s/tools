@@ -1,7 +1,7 @@
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Release
 metadata:
-  name: far-0-8-1-prod
+  name: far-0-8-1-prod-2
   namespace: rhwa-tenant
 spec:
   releasePlan: far-0-8-releaseplan-prod
@@ -14,8 +14,6 @@ spec:
           - id: RHWA-1381
             source: issues.redhat.com
           - id: RHWA-1442
-            source: issues.redhat.com
-          - id: RHWA-1444
             source: issues.redhat.com
           - id: RHWA-1448
             source: issues.redhat.com

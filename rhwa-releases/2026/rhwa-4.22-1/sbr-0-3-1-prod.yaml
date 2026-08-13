@@ -15,8 +15,6 @@ spec:
             source: issues.redhat.com
           - id: RHWA-1443
             source: issues.redhat.com
-          - id: RHWA-1445
-            source: issues.redhat.com
           - id: RHWA-1447
             source: issues.redhat.com
           - id: RHWA-1456
