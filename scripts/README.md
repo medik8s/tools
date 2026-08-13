@@ -8,6 +8,7 @@ All automation scripts for RHWA releases, Mintmaker, and cluster setup.
 |--------|---------|
 | `create_release.sh` | Generate FBC and non-FBC release YAMLs from a staged IIB |
 | `tag_downstream.sh` | Tag downstream GitLab repos from Konflux prod releases |
+| `verify-post-release.sh` | Verify post-release images on registry.redhat.io and OCP catalogs |
 | `mintmaker-toggle.sh` | Toggle Mintmaker (Renovate) on Konflux components |
 | `mintmaker-config.yaml` | Per-operator/version Mintmaker enable/disable config |
 

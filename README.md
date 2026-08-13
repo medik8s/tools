@@ -13,6 +13,7 @@ This repo includes shared Dragonfly project files common to all RHWA operators.
   - `rhwa-releases/2026/` — Releases from 2026 (rhwa-26.x, rhwa-4.2x).
 - `scripts` — All automation scripts ([README](scripts/README.md)):
   - **Release:** `create_release.sh`, `tag_downstream.sh` — generate Konflux release YAMLs from staged IIBs and tag downstream GitLab repos.
+  - **Verification:** `verify-post-release.sh` — verify post-release images on registry.redhat.io and OCP catalogs, with optional Konflux Release CR checks.
   - **Mintmaker:** `mintmaker-toggle.sh`, `mintmaker-config.yaml` — enable or disable Mintmaker (Renovate) on Konflux components per operator and version.
   - **Cluster setup:** `deploy_catalog.sh`, `install_rhwa_operators.sh`, `remove_rhwa_operators.sh` — deploy operator catalogs (FBC fragment or IIB build) and install/remove all six RHWA operators on test clusters.
   - `lib/` — Shared helpers (catalog wait, pull-secret merge); `docs/` — per-script documentation.
@@ -44,6 +45,17 @@ Override GitLab URLs via environment variables:
 export GITLAB_BASE="git@gitlab.example.com:myorg"
 export GITLAB_WEB="https://gitlab.example.com/myorg"
 ```
+
+## Post-Release Verification
+
+Run `./scripts/verify-post-release.sh RELEASE_NAME` to verify that all operator and bundle images from a release are published on registry.redhat.io and that OCP FBC catalog indexes are updated.
+
+```bash
+./scripts/verify-post-release.sh rhwa-4.22-1
+./scripts/verify-post-release.sh rhwa-4.22-1 --skip-fbc -v
+```
+
+When logged into the Konflux cluster, image references are pulled from Release CR artifacts. Otherwise, images are discovered from the advisories GitLab repo (requires `GITLAB_PRIVATE_TOKEN`).
 
 ## How to Update RPMs
 
