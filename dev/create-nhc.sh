@@ -28,6 +28,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate duration format
+if ! [[ "${NHC_UNHEALTHY_DURATION}" =~ ^[0-9]+(s|m|h)$ ]]; then
+    echo "Error: NHC_UNHEALTHY_DURATION must be a duration (e.g. 300s, 5m, 1h), got: '${NHC_UNHEALTHY_DURATION}'"
+    exit 1
+fi
+
 # Check if the NHC CRD exists
 if ! ${KUBECTL} get crd nodehealthchecks.remediation.medik8s.io &>/dev/null; then
     echo "Error: NodeHealthCheck CRD not found. Deploy NHC first (make dev-deploy from the NHC directory)."

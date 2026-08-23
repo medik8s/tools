@@ -86,7 +86,9 @@ done
 if ${KUBECTL} get deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.volumes[*].name}' 2>/dev/null | grep -q cert; then
     echo "  Deployment already has TLS volume mount — skipping patch."
 else
-    echo "  Patching deployment to mount webhook TLS secret..."
+    CONTAINER_NAME=$(${KUBECTL} get deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.template.spec.containers[0].name}')
+    echo "  Patching deployment to mount webhook TLS secret (container: ${CONTAINER_NAME})..."
     ${KUBECTL} patch deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --type=strategic -p='{
       "spec": {
         "template": {
@@ -99,7 +101,7 @@ else
               }
             }],
             "containers": [{
-              "name": "manager",
+              "name": "'"${CONTAINER_NAME}"'",
               "volumeMounts": [{
                 "name": "cert",
                 "mountPath": "/tmp/k8s-webhook-server/serving-certs",

@@ -127,12 +127,13 @@ ifeq ($(DEV_REGISTRY),local)
 		fi; \
 	done; \
 	restore() { for f in $$patched; do sed -i.bak 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/' "$$f" && rm -f "$$f.bak"; done; }; \
-	trap restore EXIT; \
+	TMPTAR=$$(mktemp /tmp/dev-image-XXXXXX.tar); \
+	cleanup() { rm -f "$$TMPTAR"; restore; }; \
+	trap cleanup EXIT; \
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) . && \
-	$(CONTAINER_TOOL) save -o /tmp/dev-image-$(OPERATOR_NAME).tar $(DEV_IMG) && \
+	$(CONTAINER_TOOL) save -o "$$TMPTAR" $(DEV_IMG) && \
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
-		kind load image-archive /tmp/dev-image-$(OPERATOR_NAME).tar --name $(MEDIK8S_CLUSTER_NAME) && \
-	rm -f /tmp/dev-image-$(OPERATOR_NAME).tar
+		kind load image-archive "$$TMPTAR" --name $(MEDIK8S_CLUSTER_NAME)
 else
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
 	$(CONTAINER_TOOL) push $(DEV_IMG)
@@ -149,9 +150,9 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(DEV_IMG) && cd ../.. && \
 	ENVSUBST_BIN="$(ENVSUBST)"; \
 	if [ -n "$$ENVSUBST_BIN" ] && [ -x "$$ENVSUBST_BIN" ]; then \
-		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
+		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default 2> >(grep -v "Warning: 'commonLabels'" >&2) | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
 	else \
-		$(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $(KUBECTL) apply -f -; \
+		$(KUSTOMIZE) build config/default 2> >(grep -v "Warning: 'commonLabels'" >&2) | $(KUBECTL) apply -f -; \
 	fi
 	@# Detect the operator namespace from kustomization files (reliable, no cluster query needed).
 	@# The namespace may be in config/default/ or in a component/patch kustomization.yaml.

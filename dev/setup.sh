@@ -241,11 +241,12 @@ else
     echo "  Namespace 'medik8s-leases' already exists."
 fi
 
-echo "=== Installing cert-manager ==="
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.17.2}"
+echo "=== Installing cert-manager ${CERT_MANAGER_VERSION} ==="
 if ${KUBECTL} get crd certificates.cert-manager.io &>/dev/null; then
     echo "  cert-manager already installed (CRDs found)."
 else
-    ${KUBECTL} apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+    ${KUBECTL} apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
     echo "  Waiting for cert-manager to be ready..."
     ${KUBECTL} wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
 fi
