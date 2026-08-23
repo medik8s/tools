@@ -41,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --name)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --name requires a cluster name argument."
+                exit 1
+            fi
             CLUSTER_NAME="$2"
             shift 2
             ;;

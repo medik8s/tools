@@ -16,6 +16,10 @@ NHC_UNHEALTHY_DURATION="${NHC_UNHEALTHY_DURATION:-300s}"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --duration)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --duration requires a value (e.g. 300s, 5m, 1h)"
+                exit 1
+            fi
             NHC_UNHEALTHY_DURATION="$2"
             shift 2
             ;;

@@ -75,8 +75,8 @@ ${KUBECTL} wait --for=condition=Ready certificate/serving-cert -n "${NAMESPACE}"
 # Annotate webhook configurations for CA injection
 for wh_type in mutatingwebhookconfigurations validatingwebhookconfigurations; do
     for wh in $(${KUBECTL} get "${wh_type}" -o name 2>/dev/null); do
-        # Only annotate webhooks that reference services in our namespace
-        if ${KUBECTL} get "${wh}" -o yaml 2>/dev/null | grep -q "namespace: ${NAMESPACE}"; then
+        # Only annotate webhooks whose clientConfig targets our namespace
+        if ${KUBECTL} get "${wh}" -o jsonpath='{.webhooks[*].clientConfig.service.namespace}' 2>/dev/null | grep -qw "${NAMESPACE}"; then
             ${KUBECTL} annotate "${wh}" cert-manager.io/inject-ca-from="${NAMESPACE}/serving-cert" --overwrite 2>/dev/null || true
         fi
     done
