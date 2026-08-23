@@ -52,7 +52,7 @@ TTL_SH_TTL ?= 2h
 ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
 else
-  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 6 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
+  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
 endif
 
 # Detect kubectl or oc

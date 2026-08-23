@@ -246,6 +246,10 @@ else
 fi
 
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.17.2}"
+if ! [[ "${CERT_MANAGER_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: CERT_MANAGER_VERSION must be a semver tag (e.g. v1.17.2), got: '${CERT_MANAGER_VERSION}'"
+    exit 1
+fi
 echo "=== Installing cert-manager ${CERT_MANAGER_VERSION} ==="
 if ${KUBECTL} get crd certificates.cert-manager.io &>/dev/null; then
     echo "  cert-manager already installed (CRDs found)."

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Creates a NodeHealthCheck CR that references an available remediator.
 # Auto-detects deployed remediator templates (SNR, FAR, MDR) and uses the first found.
-# Usage: create-nhc.sh [--duration <seconds>]
+# Usage: create-nhc.sh [--duration <duration>]  (e.g. 300s, 5m, 1h)
 
 set -euo pipefail
 
