@@ -1,0 +1,23 @@
+name: shellcheck
+
+on:
+  push:
+    branches: [main]
+    paths: ["dev/**/*.sh"]
+  pull_request:
+    paths: ["dev/**/*.sh"]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: dev
+          severity: warning
