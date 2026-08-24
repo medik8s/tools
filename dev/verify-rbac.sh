@@ -40,14 +40,30 @@ check() {
     if [ "$result" = "yes" ]; then
         printf "  PASS  %-50s %s/%s (scope: %s)\n" "$label" "$verb" "$resource" "$scope"
         PASS=$((PASS + 1))
-    else
+    elif [[ "$result" == no* ]]; then
         printf "  FAIL  %-50s %s/%s (scope: %s)\n" "$label" "$verb" "$resource" "$scope"
+        FAIL=$((FAIL + 1))
+    else
+        printf "  ERR   %-50s %s/%s (scope: %s) [unexpected: %s]\n" "$label" "$verb" "$resource" "$scope" "$result"
         FAIL=$((FAIL + 1))
     fi
 }
 
 echo "=== Medik8s RBAC Verification (non-OLM deployment) ==="
 echo ""
+
+if ! ${KUBECTL} cluster-info &>/dev/null; then
+    echo "Error: cannot connect to the Kubernetes cluster."
+    echo "Ensure your kubeconfig is set and the cluster is reachable."
+    exit 1
+fi
+
+if ! ${KUBECTL} auth can-i --list \
+    --as="system:serviceaccount:default:default" &>/dev/null; then
+    echo "Error: cannot impersonate ServiceAccounts."
+    echo "This script requires cluster-admin or the 'impersonate' verb on serviceaccounts."
+    exit 1
+fi
 
 FOUND_ANY=false
 
@@ -87,6 +103,7 @@ for ns in $(${KUBECTL} get namespace --no-headers -o custom-columns=NAME:.metada
         # Core permissions that should always work
         check "$sa" "$ns" "get" "nodes" "cluster" "${OPERATOR}: get nodes"
         check "$sa" "$ns" "list" "nodes" "cluster" "${OPERATOR}: list nodes"
+        check "$sa" "$ns" "watch" "nodes" "cluster" "${OPERATOR}: watch nodes"
 
         echo ""
     done
