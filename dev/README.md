@@ -216,6 +216,7 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 | `dev-simulate-storm` | Stop kubelet on 2 workers |
 | `dev-simulate-network` | Block API server from a worker |
 | `dev-recover` | Recover all workers and clean up |
+| `dev-rbac-check` | Verify RBAC correctness for non-OLM deployment |
 | `dev-help` | Show all dev targets |
 
 ## Using an Existing Cluster (OCP, etc.)
@@ -275,6 +276,29 @@ commands to run instead of executing them directly (safety first). Set
 | FAR | Controller logic | No real fence agents — controller reconciliation is testable |
 | MDR | Controller logic | No Machine API — reconciliation testable via envtest (`make test`) |
 | SBR | Unit only | No shared storage. Leader election RBAC error on startup (SBR bug). |
+
+## RBAC Verification
+
+OLM silently promotes namespace-scoped Roles to ClusterRoles when using
+AllNamespaces install mode. Since `dev-deploy` uses raw kustomize (no OLM),
+it applies RBAC manifests as-is — exposing mismatches between namespace-scoped
+permissions and cluster-scoped runtime behavior.
+
+Run `make dev-rbac-check` after deploying operators to detect these issues:
+
+```bash
+make dev-deploy
+make dev-rbac-check
+```
+
+Known bug classes this catches:
+- **Secret cache mismatch**: controller-runtime creates a cluster-scoped Secret
+  informer, but FAR only grants namespace-scoped Secret RBAC
+  ([fence-agents-remediation#217](https://github.com/medik8s/fence-agents-remediation/issues/217))
+- **Events on cluster-scoped objects**: client-go emits events in the default
+  namespace for Nodes/NodeMaintenance, but events RBAC is only in the
+  namespace-scoped leader election Role
+  ([node-healthcheck-operator#429](https://github.com/medik8s/node-healthcheck-operator/pull/429))
 
 ## Limitations
 
