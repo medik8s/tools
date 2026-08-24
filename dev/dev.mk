@@ -303,7 +303,7 @@ dev-describe: ## Full summary of all medik8s resources (nodes, pods, CRs, leases
 
 .PHONY: dev-shell
 dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worker)
-	@NODES=$$(kind get nodes --name $(MEDIK8S_CLUSTER_NAME) 2>/dev/null); \
+	@NODES=$$(KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get nodes --name $(MEDIK8S_CLUSTER_NAME) 2>/dev/null); \
 	if [ -z "$$NODES" ]; then \
 		NODES=$$($(KUBECTL) get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); \
 	fi; \
