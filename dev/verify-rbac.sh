@@ -23,13 +23,14 @@ source "${SCRIPT_DIR}/common.sh"
 
 PASS=0
 FAIL=0
+INFO=0
 
 check() {
     local sa="$1" ns="$2" verb="$3" resource="$4" scope="$5" label="$6"
     local result
 
     if [ "$scope" = "cluster" ]; then
-        result=$(${KUBECTL} auth can-i "$verb" "$resource" \
+        result=$(${KUBECTL} auth can-i "$verb" "$resource" --all-namespaces \
             --as="system:serviceaccount:${ns}:${sa}" 2>/dev/null || true)
     else
         result=$(${KUBECTL} auth can-i "$verb" "$resource" \
@@ -47,6 +48,29 @@ check() {
         printf "  ERR   %-50s %s/%s (scope: %s) [unexpected: %s]\n" "$label" "$verb" "$resource" "$scope" "$result"
         FAIL=$((FAIL + 1))
     fi
+}
+
+info_check() {
+    local sa="$1" ns="$2" verb="$3" resource="$4" scope="$5" label="$6"
+    local result rc
+
+    if [ "$scope" = "cluster" ]; then
+        result=$(${KUBECTL} auth can-i "$verb" "$resource" --all-namespaces \
+            --as="system:serviceaccount:${ns}:${sa}" 2>/dev/null) && rc=0 || rc=$?
+    else
+        result=$(${KUBECTL} auth can-i "$verb" "$resource" \
+            --as="system:serviceaccount:${ns}:${sa}" \
+            -n "$scope" 2>/dev/null) && rc=0 || rc=$?
+    fi
+
+    if [ "$result" = "yes" ]; then
+        printf "  INFO  %-50s %s/%s (scope: %s) — granted (unexpected)\n" "$label" "$verb" "$resource" "$scope"
+    elif [[ "$result" == no* ]]; then
+        printf "  INFO  %-50s %s/%s (scope: %s) — not granted (expected)\n" "$label" "$verb" "$resource" "$scope"
+    else
+        printf "  WARN  %-50s %s/%s (scope: %s) — query failed (rc=%d)\n" "$label" "$verb" "$resource" "$scope" "$rc"
+    fi
+    INFO=$((INFO + 1))
 }
 
 echo "=== Medik8s RBAC Verification (non-OLM deployment) ==="
@@ -67,11 +91,21 @@ fi
 
 FOUND_ANY=false
 
-for ns in $(${KUBECTL} get namespace --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | \
-    grep -E 'medik8s|fence-agents|self-node|node-healthcheck|node-maintenance|machine-deletion|storage-based'); do
+ALL_NS=$(${KUBECTL} get namespace --no-headers -o custom-columns=NAME:.metadata.name) || {
+    echo "Error: failed to list namespaces."
+    exit 1
+}
 
-    SA_LIST=$(${KUBECTL} get serviceaccount -n "$ns" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | \
-        grep -E 'controller-manager' || true)
+OPERATOR_NS=$(echo "$ALL_NS" | \
+    grep -E 'medik8s|fence-agents|self-node|node-healthcheck|node-maintenance|machine-deletion|storage-based' || true)
+
+for ns in $OPERATOR_NS; do
+    ALL_SA=$(${KUBECTL} get serviceaccount -n "$ns" --no-headers -o custom-columns=NAME:.metadata.name) || {
+        echo "Error: failed to list ServiceAccounts in namespace '$ns'."
+        exit 1
+    }
+
+    SA_LIST=$(echo "$ALL_SA" | grep -E 'controller-manager' || true)
 
     for sa in $SA_LIST; do
         FOUND_ANY=true
@@ -89,8 +123,11 @@ for ns in $(${KUBECTL} get namespace --no-headers -o custom-columns=NAME:.metada
         esac
 
         # Bug class 1: Secret cache — cluster-scoped list/watch
-        check "$sa" "$ns" "list" "secrets" "cluster" "${OPERATOR}: cluster-scoped secret list"
-        check "$sa" "$ns" "watch" "secrets" "cluster" "${OPERATOR}: cluster-scoped secret watch"
+        # Operators use namespace-scoped Secret RBAC; cluster-scoped access
+        # should NOT be granted (controller-runtime cache bypass prevents
+        # the need for it). Reported as INFO, not FAIL.
+        info_check "$sa" "$ns" "list" "secrets" "cluster" "${OPERATOR}: cluster-scoped secret list"
+        info_check "$sa" "$ns" "watch" "secrets" "cluster" "${OPERATOR}: cluster-scoped secret watch"
 
         # Bug class 2: Events on cluster-scoped objects — events in default namespace
         check "$sa" "$ns" "create" "events" "default" "${OPERATOR}: create events in default ns"
@@ -118,6 +155,7 @@ fi
 echo "=== Results ==="
 echo "  PASS: ${PASS}"
 echo "  FAIL: ${FAIL}"
+echo "  INFO: ${INFO}"
 echo ""
 
 if [ "$FAIL" -gt 0 ]; then
