@@ -291,12 +291,13 @@ make dev-deploy
 make dev-rbac-check
 ```
 
-Known bug classes this catches:
-- **Secret cache mismatch**: controller-runtime creates a cluster-scoped Secret
-  informer, but FAR only grants namespace-scoped Secret RBAC
-  ([fence-agents-remediation#217](https://github.com/medik8s/fence-agents-remediation/issues/217))
-- **Events on cluster-scoped objects**: client-go emits events in the default
-  namespace for Nodes/NodeMaintenance, but events RBAC is only in the
+Known bug classes this checks:
+- **Secret cache** (INFO): operators use namespace-scoped Secret RBAC.
+  Cluster-scoped Secret access should NOT be granted — controller-runtime cache
+  bypass makes it unnecessary. Reported as INFO (expected: not granted).
+  See [fence-agents-remediation#217](https://github.com/medik8s/fence-agents-remediation/issues/217).
+- **Events on cluster-scoped objects** (FAIL): client-go emits events in the
+  default namespace for Nodes/NodeMaintenance, but events RBAC is only in the
   namespace-scoped leader election Role
   ([node-healthcheck-operator#429](https://github.com/medik8s/node-healthcheck-operator/pull/429))
 
