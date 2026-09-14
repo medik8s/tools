@@ -34,7 +34,7 @@ get_worker_nodes() {
     # Try kind first; if it can't see the cluster (e.g. created with sudo),
     # fall back to kubectl node names (which match Kind container names).
     local nodes
-    nodes=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null | grep worker | sort)
+    nodes=$(KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}" kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null | grep worker | sort)
     if [ -z "$nodes" ]; then
         nodes=$(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | sort)
     fi

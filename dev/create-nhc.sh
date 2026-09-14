@@ -1,7 +1,7 @@
 #!/bin/bash
 # Creates a NodeHealthCheck CR that references an available remediator.
 # Auto-detects deployed remediator templates (SNR, FAR, MDR) and uses the first found.
-# Usage: create-nhc.sh [--duration <seconds>]
+# Usage: create-nhc.sh [--duration <duration>]  (e.g. 300s, 5m, 1h)
 
 set -euo pipefail
 
@@ -16,6 +16,10 @@ NHC_UNHEALTHY_DURATION="${NHC_UNHEALTHY_DURATION:-300s}"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --duration)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --duration requires a value (e.g. 300s, 5m, 1h)"
+                exit 1
+            fi
             NHC_UNHEALTHY_DURATION="$2"
             shift 2
             ;;
@@ -27,6 +31,12 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Validate duration format
+if ! [[ "${NHC_UNHEALTHY_DURATION}" =~ ^[0-9]+(s|m|h)$ ]]; then
+    echo "Error: NHC_UNHEALTHY_DURATION must be a duration (e.g. 300s, 5m, 1h), got: '${NHC_UNHEALTHY_DURATION}'"
+    exit 1
+fi
 
 # Check if the NHC CRD exists
 if ! ${KUBECTL} get crd nodehealthchecks.remediation.medik8s.io &>/dev/null; then

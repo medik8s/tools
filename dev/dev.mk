@@ -52,7 +52,7 @@ TTL_SH_TTL ?= 2h
 ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
 else
-  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell echo $$USER | head -c 8):$(TTL_SH_TTL)
+  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
 endif
 
 # Detect kubectl or oc
@@ -127,12 +127,13 @@ ifeq ($(DEV_REGISTRY),local)
 		fi; \
 	done; \
 	restore() { for f in $$patched; do sed -i.bak 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/' "$$f" && rm -f "$$f.bak"; done; }; \
-	trap restore EXIT; \
+	TMPTAR=$$(mktemp /tmp/dev-image-XXXXXX.tar); \
+	cleanup() { rm -f "$$TMPTAR"; restore; }; \
+	trap cleanup EXIT; \
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) . && \
-	$(CONTAINER_TOOL) save -o /tmp/dev-image-$(OPERATOR_NAME).tar $(DEV_IMG) && \
+	$(CONTAINER_TOOL) save -o "$$TMPTAR" $(DEV_IMG) && \
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
-		kind load image-archive /tmp/dev-image-$(OPERATOR_NAME).tar --name $(MEDIK8S_CLUSTER_NAME) && \
-	rm -f /tmp/dev-image-$(OPERATOR_NAME).tar
+		kind load image-archive "$$TMPTAR" --name $(MEDIK8S_CLUSTER_NAME)
 else
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
 	$(CONTAINER_TOOL) push $(DEV_IMG)
@@ -149,9 +150,9 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(DEV_IMG) && cd ../.. && \
 	ENVSUBST_BIN="$(ENVSUBST)"; \
 	if [ -n "$$ENVSUBST_BIN" ] && [ -x "$$ENVSUBST_BIN" ]; then \
-		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
+		export IMG=$(DEV_IMG) && $(KUSTOMIZE) build config/default 2> >(grep -v "Warning: 'commonLabels'" >&2) | $$ENVSUBST_BIN | $(KUBECTL) apply -f -; \
 	else \
-		$(KUSTOMIZE) build config/default 2>&1 | grep -v "Warning: 'commonLabels'" | $(KUBECTL) apply -f -; \
+		$(KUSTOMIZE) build config/default 2> >(grep -v "Warning: 'commonLabels'" >&2) | $(KUBECTL) apply -f -; \
 	fi
 	@# Detect the operator namespace from kustomization files (reliable, no cluster query needed).
 	@# The namespace may be in config/default/ or in a component/patch kustomization.yaml.
@@ -302,7 +303,7 @@ dev-describe: ## Full summary of all medik8s resources (nodes, pods, CRs, leases
 
 .PHONY: dev-shell
 dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worker)
-	@NODES=$$(kind get nodes --name $(MEDIK8S_CLUSTER_NAME) 2>/dev/null); \
+	@NODES=$$(KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get nodes --name $(MEDIK8S_CLUSTER_NAME) 2>/dev/null); \
 	if [ -z "$$NODES" ]; then \
 		NODES=$$($(KUBECTL) get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); \
 	fi; \
@@ -316,6 +317,10 @@ dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worke
 	fi; \
 	if [ -z "$$TARGET" ]; then \
 		TARGET=$$(echo "$$NODES" | head -1); \
+	fi; \
+	if ! echo "$$NODES" | grep -qx "$$TARGET"; then \
+		echo "Error: '$$TARGET' is not a node in the cluster. Available: $$(echo $$NODES | tr '\n' ' ')"; \
+		exit 1; \
 	fi; \
 	echo "Opening shell on $$TARGET..."; \
 	echo "  (type 'exit' to return)"; \

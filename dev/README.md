@@ -78,7 +78,7 @@ sudo sysctl -w fs.inotify.max_user_watches=524288
 ```
 
 To make persistent, add to `/etc/sysctl.d/99-kind.conf`:
-```
+```ini
 fs.inotify.max_user_instances=8192
 fs.inotify.max_user_watches=524288
 ```
@@ -129,7 +129,7 @@ endif
 ```
 
 Add `.tools/` to your `.gitignore`:
-```
+```bash
 echo '.tools/' >> .gitignore
 ```
 

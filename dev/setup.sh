@@ -41,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --name)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --name requires a cluster name argument."
+                exit 1
+            fi
             CLUSTER_NAME="$2"
             shift 2
             ;;
@@ -241,11 +245,16 @@ else
     echo "  Namespace 'medik8s-leases' already exists."
 fi
 
-echo "=== Installing cert-manager ==="
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.17.2}"
+if ! [[ "${CERT_MANAGER_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: CERT_MANAGER_VERSION must be a semver tag (e.g. v1.17.2), got: '${CERT_MANAGER_VERSION}'"
+    exit 1
+fi
+echo "=== Installing cert-manager ${CERT_MANAGER_VERSION} ==="
 if ${KUBECTL} get crd certificates.cert-manager.io &>/dev/null; then
     echo "  cert-manager already installed (CRDs found)."
 else
-    ${KUBECTL} apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+    ${KUBECTL} apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
     echo "  Waiting for cert-manager to be ready..."
     ${KUBECTL} wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
 fi

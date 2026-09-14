@@ -29,6 +29,8 @@ if ! command -v kind &>/dev/null; then
     exit 1
 fi
 
+export KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}"
+
 if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "=== Deleting Kind cluster '${CLUSTER_NAME}' ==="
     kind delete cluster --name "${CLUSTER_NAME}"

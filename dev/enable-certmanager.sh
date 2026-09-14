@@ -75,8 +75,8 @@ ${KUBECTL} wait --for=condition=Ready certificate/serving-cert -n "${NAMESPACE}"
 # Annotate webhook configurations for CA injection
 for wh_type in mutatingwebhookconfigurations validatingwebhookconfigurations; do
     for wh in $(${KUBECTL} get "${wh_type}" -o name 2>/dev/null); do
-        # Only annotate webhooks that reference services in our namespace
-        if ${KUBECTL} get "${wh}" -o yaml 2>/dev/null | grep -q "namespace: ${NAMESPACE}"; then
+        # Only annotate webhooks whose clientConfig targets our namespace
+        if ${KUBECTL} get "${wh}" -o jsonpath='{.webhooks[*].clientConfig.service.namespace}' 2>/dev/null | grep -qw "${NAMESPACE}"; then
             ${KUBECTL} annotate "${wh}" cert-manager.io/inject-ca-from="${NAMESPACE}/serving-cert" --overwrite 2>/dev/null || true
         fi
     done
@@ -86,7 +86,9 @@ done
 if ${KUBECTL} get deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.volumes[*].name}' 2>/dev/null | grep -q cert; then
     echo "  Deployment already has TLS volume mount — skipping patch."
 else
-    echo "  Patching deployment to mount webhook TLS secret..."
+    CONTAINER_NAME=$(${KUBECTL} get deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" \
+      -o jsonpath='{.spec.template.spec.containers[0].name}')
+    echo "  Patching deployment to mount webhook TLS secret (container: ${CONTAINER_NAME})..."
     ${KUBECTL} patch deployment "${DEPLOY_NAME}" -n "${NAMESPACE}" --type=strategic -p='{
       "spec": {
         "template": {
@@ -99,7 +101,7 @@ else
               }
             }],
             "containers": [{
-              "name": "manager",
+              "name": "'"${CONTAINER_NAME}"'",
               "volumeMounts": [{
                 "name": "cert",
                 "mountPath": "/tmp/k8s-webhook-server/serving-certs",
