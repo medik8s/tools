@@ -190,13 +190,28 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 		echo "  Warning: could not detect operator namespace. Skipping cert-manager setup."; \
 	fi
 	@# Create NHC CR after webhooks are ready (cert-manager must be configured first).
-	@# Auto-detects any deployed remediator template (SNR, FAR, MDR).
+	@# Auto-detects any deployed remediator template (SNR, FAR, MDR, SBR).
 	@if $(KUBECTL) get crd nodehealthchecks.remediation.medik8s.io &>/dev/null && \
 	    ($(KUBECTL) get selfnoderemediationtemplate -A --no-headers 2>/dev/null | grep -q . || \
 	     $(KUBECTL) get fenceagentsremediationtemplate -A --no-headers 2>/dev/null | grep -q . || \
-	     $(KUBECTL) get machinedeletionremediationtemplate -A --no-headers 2>/dev/null | grep -q .); then \
+	     $(KUBECTL) get machinedeletionremediationtemplate -A --no-headers 2>/dev/null | grep -q . || \
+	     $(KUBECTL) get storagebasedremediationtemplate -A --no-headers 2>/dev/null | grep -q .); then \
 		$(DEV_DIR)/create-nhc.sh; \
 	fi
+	@# SBR-specific: create a StorageBasedRemediationConfig CR so the operator
+	@# provisions its DaemonSet and PVC.  Only runs when deploying SBR itself.
+ifeq ($(OPERATOR_NAME),storage-based-remediation)
+	@if $(KUBECTL) get crd storagebasedremediationconfigs.storage-based-remediation.medik8s.io &>/dev/null; then \
+		NS=$$({ grep -rh '^namespace:' config/default/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
+		if [ -z "$$NS" ]; then NS=sbr-operator-system; fi; \
+		if ! $(KUBECTL) get storagebasedremediationconfig -n $$NS --no-headers 2>/dev/null | grep -q .; then \
+			echo "=== Creating StorageBasedRemediationConfig CR ==="; \
+			$(KUBECTL) apply -n $$NS -f config/samples/storage-based-remediation_v1alpha1_storagebasedremediationconfig.yaml; \
+		else \
+			echo "  StorageBasedRemediationConfig already exists in $$NS — skipping."; \
+		fi; \
+	fi
+endif
 
 .PHONY: dev-undeploy
 dev-undeploy: ## Remove operator from dev cluster

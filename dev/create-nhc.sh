@@ -1,6 +1,6 @@
 #!/bin/bash
 # Creates a NodeHealthCheck CR that references an available remediator.
-# Auto-detects deployed remediator templates (SNR, FAR, MDR) and uses the first found.
+# Auto-detects deployed remediator templates (SNR, FAR, MDR, SBR) and uses the first found.
 # Usage: create-nhc.sh [--duration <duration>]  (e.g. 300s, 5m, 1h)
 
 set -euo pipefail
@@ -80,8 +80,18 @@ if [ -z "${REMEDIATOR_API}" ] && ${KUBECTL} get crd machinedeletionremediationte
     fi
 fi
 
+# Try SBR
+if [ -z "${REMEDIATOR_API}" ] && ${KUBECTL} get crd storagebasedremediationtemplates.storage-based-remediation.medik8s.io &>/dev/null; then
+    REMEDIATOR_NS=$(${KUBECTL} get storagebasedremediationtemplate -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | head -1)
+    REMEDIATOR_NAME=$(${KUBECTL} get storagebasedremediationtemplate -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+    if [ -n "${REMEDIATOR_NS}" ] && [ -n "${REMEDIATOR_NAME}" ]; then
+        REMEDIATOR_API="storage-based-remediation.medik8s.io/v1alpha1"
+        REMEDIATOR_KIND="StorageBasedRemediationTemplate"
+    fi
+fi
+
 if [ -z "${REMEDIATOR_API}" ]; then
-    echo "Error: No remediator template found. Deploy a remediator first (SNR, FAR, or MDR)."
+    echo "Error: No remediator template found. Deploy a remediator first (SNR, FAR, MDR, or SBR)."
     exit 1
 fi
 
