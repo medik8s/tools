@@ -2,6 +2,10 @@
 
 A shared, consistent development environment for all medik8s operators.
 
+This directory provides two shared Makefile includes:
+- **dev.mk** — Local development targets (Kind cluster, deploy, simulate failures)
+- **olm.mk** — OLM deployment targets (build, push to ttl.sh, install via operator-sdk)
+
 ## Quick Start
 
 ```bash
@@ -300,3 +304,96 @@ commands to run instead of executing them directly (safety first). Set
 - **SNR `${IMG}` placeholders** — SNR manifests use `${IMG}` placeholders expanded by `envsubst`. The `dev-deploy` target handles this automatically, but running `kustomize build config/default | kubectl apply -f -` directly will produce `InvalidImageName` errors. The SNR controller reconciles DaemonSets from templates baked into the image, so image patches don't persist — always use `make dev-deploy` or `make dev-redeploy` for SNR.
 
 For full-fidelity testing of these scenarios, use an OpenShift cluster with real hardware (BMC/IPMI for FAR, Machine API for MDR, ODF for SBR, hardware watchdog for SNR). The `SKIP_KIND=true` workflow supports deploying to external clusters.
+
+---
+
+# OLM Deployment (olm.mk)
+
+The `olm.mk` file provides targets for deploying operators via OLM (Operator Lifecycle Manager) for testing production-like deployment paths locally.
+
+## Quick Start
+
+```bash
+make deploy-olm          # Build, push to ttl.sh, install via OLM
+make undeploy-olm        # Remove operator
+make versions            # Show tool versions
+```
+
+## Setup
+
+Add to the end of your operator's Makefile:
+
+```makefile
+# OLM deployment via shared olm.mk
+OLM_OPERATOR_NAME ?= node-healthcheck-operator
+
+# Shared OLM targets from medik8s/tools
+TOOLS_DIR ?= $(shell cd .. && pwd)/tools
+OLM_MK := $(TOOLS_DIR)/dev/olm.mk
+ifeq ($(wildcard $(OLM_MK)),)
+  TOOLS_DIR := $(shell pwd)/.tools
+  OLM_MK := $(TOOLS_DIR)/dev/olm.mk
+endif
+-include $(OLM_MK)
+ifeq ($(wildcard $(OLM_MK)),)
+olm-%:
+	@echo "Downloading medik8s/tools into $(TOOLS_DIR)..."
+	@if [ -d $(TOOLS_DIR) ]; then \
+		if [ -f $(TOOLS_DIR)/.managed-by-makefile ]; then \
+			echo "  Removing stale $(TOOLS_DIR)..."; rm -rf $(TOOLS_DIR); \
+		else \
+			echo "Error: $(TOOLS_DIR) exists but was not created by this Makefile."; \
+			echo "       Remove it manually or set TOOLS_DIR to a valid medik8s/tools checkout."; exit 1; \
+		fi; \
+	fi
+	@git clone --depth 1 https://github.com/medik8s/tools.git $(TOOLS_DIR)
+	@touch $(TOOLS_DIR)/.managed-by-makefile
+	@test -f $(OLM_MK) || { echo "Error: $(OLM_MK) not found after clone."; exit 1; }
+	@$(MAKE) $@
+endif
+```
+
+## Agent Images (SBR, etc.)
+
+Operators with separate agent binaries (e.g., SBR's `sbr-agent`) should set `OLM_AGENT_IMAGES` before the include:
+
+```makefile
+OLM_OPERATOR_NAME ?= storage-based-remediation
+OLM_AGENT_IMAGES ?= sbr-agent  # Space-separated for multiple agents
+```
+
+olm.mk automatically:
+- Builds `cmd/<agent>/Dockerfile` → `ttl.sh/<operator>-<rev>-<agent>:1h`
+- Generates `<agent>-role` RBAC via controller-gen
+- Substitutes `${<AGENT_UPPER>_IMG}` placeholders in bundle manifests
+
+## Available Targets
+
+| Target | Description |
+|--------|-------------|
+| `deploy-olm` | Build, push to ttl.sh, and install via operator-sdk |
+| `undeploy-olm` | Remove operator installed by deploy-olm |
+| `versions` | Display tool and project versions |
+| `olm-build-push` | Build and push images (without installing) |
+| `olm-help` | Show OLM deployment help |
+
+## Configuration Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLM_OPERATOR_NAME` | *(required)* | Operator name |
+| `OLM_OPERATOR_NAMESPACE` | `openshift-workload-availability` | Target namespace |
+| `OLM_CHANNEL` | `stable` | OLM channel |
+| `TTL_DURATION` | `1h` | Image expiry on ttl.sh |
+| `OLM_AGENT_IMAGES` | *(empty)* | Space-separated agent names |
+
+## Why OLM Deployment?
+
+OLM deployment tests the production install path locally:
+- Bundle manifest correctness
+- RBAC via OLM (different from direct deployment)
+- CatalogSource resolution
+- Install/upgrade paths
+- Operator registry integration
+
+Complements `dev.mk` (fast dev loop) with production-path validation.
