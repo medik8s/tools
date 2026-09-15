@@ -336,7 +336,7 @@ ifeq ($(wildcard $(OLM_MK)),)
 endif
 -include $(OLM_MK)
 ifeq ($(wildcard $(OLM_MK)),)
-olm-%:
+olm-% deploy-olm undeploy-olm versions:
 	@echo "Downloading medik8s/tools into $(TOOLS_DIR)..."
 	@if [ -d $(TOOLS_DIR) ]; then \
 		if [ -f $(TOOLS_DIR)/.managed-by-makefile ]; then \

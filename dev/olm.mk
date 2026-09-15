@@ -144,7 +144,7 @@ $(OLM_OPERATOR_SDK):
 olm-kustomize: $(OLM_KUSTOMIZE) ## Install kustomize.
 $(OLM_KUSTOMIZE):
 	@mkdir -p $(OLM_LOCALBIN)
-	@GOBIN=$(OLM_LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@v$(OLM_KUSTOMIZE_VERSION)
+	@GOBIN=$(OLM_LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@$(if $(filter v%,$(OLM_KUSTOMIZE_VERSION)),$(OLM_KUSTOMIZE_VERSION),v$(OLM_KUSTOMIZE_VERSION))
 	@mv $(OLM_LOCALBIN)/kustomize $@
 
 .PHONY: olm-tools
@@ -170,7 +170,8 @@ olm-build-push: olm-tools ## Build and push source and OLM bundle images to ttl.
 	@if [ -n "$(OLM_AGENT_IMAGES)" ]; then \
 		agent_subs=""; \
 		for agent in $(OLM_AGENT_IMAGES); do \
-			agent_subs="$$agent_subs | sed 's|[\$$]{\U$$agent\E_IMG}|$(OLM_IMAGE_PREFIX)-$$agent:$(OLM_TTL_DURATION)|g'"; \
+			agent_upper=$$(echo "$$agent" | tr 'a-z-' 'A-Z_'); \
+			agent_subs="$$agent_subs | sed 's|[\$$]{$${agent_upper}_IMG}|$(OLM_IMAGE_PREFIX)-$$agent:$(OLM_TTL_DURATION)|g'"; \
 		done; \
 		eval "$(OLM_KUSTOMIZE) build config/manifests $$agent_subs | \
 			$(OLM_OPERATOR_SDK) generate bundle -q --manifests --metadata --overwrite \
@@ -198,6 +199,11 @@ deploy-olm: versions ## Display versions, then build source, push temporary imag
 		echo "$$identity" >&2; \
 		exit 1; \
 	fi; \
+	if ! $(OLM_OC) get deployment -n olm olm-operator >/dev/null 2>&1 && \
+	   ! $(OLM_OC) get deployment -n openshift-operator-lifecycle-manager olm-operator >/dev/null 2>&1; then \
+		echo "Error: OLM is not installed in this cluster. Run 'operator-sdk olm install' or use a cluster with OLM." >&2; \
+		exit 1; \
+	fi; \
 	work_dir="$$(mktemp -d)"; \
 	cleanup_work_dir() { chmod -R 777 "$$work_dir" 2>/dev/null || true; rm -rf "$$work_dir"; }; \
 	trap cleanup_work_dir EXIT; \
@@ -222,11 +228,13 @@ undeploy-olm: olm-operator-sdk ## Remove the source operator installed by deploy
 		echo "$$identity" >&2; \
 		exit 1; \
 	fi; \
-	$(OLM_OC) get namespace "$(OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1 || \
-		$(OLM_OC) create namespace "$(OLM_OPERATOR_NAMESPACE)"; \
+	if ! $(OLM_OC) get namespace "$(OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1; then \
+		echo "Namespace $(OLM_OPERATOR_NAMESPACE) does not exist; nothing to clean up."; \
+		exit 0; \
+	fi; \
 	bundle_name="$$(basename "$(OLM_BUNDLE_IMAGE)" | sed 's/:.*$$//')"; \
 	$(OLM_OPERATOR_SDK) cleanup "$(OLM_PACKAGE_NAME)" \
-		--namespace "$(OLM_OPERATOR_NAMESPACE)" || true; \
+		--namespace "$(OLM_OPERATOR_NAMESPACE)"; \
 	$(OLM_OC) delete catalogsource "$(OLM_CATALOG_SOURCE_NAME)" \
 		-n "$(OLM_CATALOG_SOURCE_NAMESPACE)" --ignore-not-found=true; \
 	echo "Undeployed $(OLM_PACKAGE_NAME) from $(OLM_OPERATOR_NAMESPACE)"
