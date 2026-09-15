@@ -202,7 +202,7 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 	@# provisions its DaemonSet and PVC.  Only runs when deploying SBR itself.
 ifeq ($(OPERATOR_NAME),storage-based-remediation)
 	@if $(KUBECTL) get crd storagebasedremediationconfigs.storage-based-remediation.medik8s.io &>/dev/null; then \
-		NS=$$({ grep -rh '^namespace:' config/default/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
+		NS=$$({ grep -rh '^namespace:' config/default/kustomization.yaml config/patches/*/kustomization.yaml config/components/*/kustomization.yaml 2>/dev/null || true; } | head -1 | awk '{print $$2}'); \
 		if [ -z "$$NS" ]; then NS=sbr-operator-system; fi; \
 		if ! $(KUBECTL) get storagebasedremediationconfig -n $$NS --no-headers 2>/dev/null | grep -q .; then \
 			echo "=== Creating StorageBasedRemediationConfig CR ==="; \
