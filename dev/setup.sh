@@ -126,6 +126,78 @@ else
 
     export KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}"
 
+    # Pre-cluster registry setup: configure host DNS and Docker daemon BEFORE
+    # creating the Kind cluster (Docker restart would kill Kind containers).
+    if [ "${SKIP_REGISTRY}" != true ]; then
+        echo "=== Configuring host for local registry '${REG_NAME}:${REG_PORT}' ==="
+
+        # Make the registry hostname resolvable from the host.
+        if ! getent hosts "${REG_NAME}" >/dev/null 2>&1; then
+            if [ -w /etc/hosts ] || [ "$(id -u)" = "0" ]; then
+                echo "127.0.0.1 ${REG_NAME}" >> /etc/hosts
+                echo "  Added ${REG_NAME} to /etc/hosts."
+            elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+                echo "127.0.0.1 ${REG_NAME}" | sudo tee -a /etc/hosts >/dev/null
+                echo "  Added ${REG_NAME} to /etc/hosts (via sudo)."
+            else
+                echo "  Warning: ${REG_NAME} is not in /etc/hosts and we don't have write access."
+                echo "  Run: echo '127.0.0.1 ${REG_NAME}' | sudo tee -a /etc/hosts"
+            fi
+        else
+            echo "  ${REG_NAME} already resolvable from host."
+        fi
+
+        # Configure Docker to allow HTTP (insecure) access to the registry.
+        # Must happen before Kind cluster creation since Docker restart kills containers.
+        if [ "${CONTAINER_TOOL}" = "docker" ]; then
+            DAEMON_JSON="/etc/docker/daemon.json"
+            INSECURE_ENTRY="${REG_NAME}:${REG_PORT}"
+            if [ -f "${DAEMON_JSON}" ] && grep -q "${INSECURE_ENTRY}" "${DAEMON_JSON}" 2>/dev/null; then
+                echo "  Docker already configured for insecure registry ${INSECURE_ENTRY}."
+            else
+                _write_daemon_json() {
+                    local target="$1"
+                    if [ -f "${target}" ] && [ -s "${target}" ]; then
+                        python3 -c "
+import json,sys
+d=json.load(open('${target}'))
+r=d.get('insecure-registries',[])
+e='${INSECURE_ENTRY}'
+if e not in r: r.append(e)
+d['insecure-registries']=r
+json.dump(d,sys.stdout,indent=2)
+" > "${target}.tmp" && mv "${target}.tmp" "${target}"
+                    else
+                        echo "{\"insecure-registries\": [\"${INSECURE_ENTRY}\"]}" > "${target}"
+                    fi
+                }
+                NEED_DOCKER_RESTART=false
+                if [ -w "${DAEMON_JSON}" ] || [ "$(id -u)" = "0" ]; then
+                    _write_daemon_json "${DAEMON_JSON}"
+                    NEED_DOCKER_RESTART=true
+                elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+                    TMP_DJ=$(mktemp)
+                    [ -f "${DAEMON_JSON}" ] && sudo cp "${DAEMON_JSON}" "${TMP_DJ}" && chmod 644 "${TMP_DJ}"
+                    _write_daemon_json "${TMP_DJ}"
+                    sudo cp "${TMP_DJ}" "${DAEMON_JSON}"
+                    rm -f "${TMP_DJ}"
+                    NEED_DOCKER_RESTART=true
+                else
+                    echo "  Warning: Cannot configure Docker insecure registries (no write access)."
+                    echo "  Run: echo '{\"insecure-registries\": [\"${INSECURE_ENTRY}\"]}' | sudo tee ${DAEMON_JSON} && sudo systemctl restart docker"
+                fi
+                if [ "${NEED_DOCKER_RESTART}" = true ]; then
+                    if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+                        sudo systemctl restart docker 2>/dev/null || true
+                    else
+                        systemctl restart docker 2>/dev/null || true
+                    fi
+                    echo "  Configured Docker insecure registry for ${INSECURE_ENTRY}."
+                fi
+            fi
+        fi
+    fi
+
     # Check inotify limits — Kind nodes inherit host limits and operators need many watchers.
     # Skip on non-Linux (e.g. macOS) where /proc/sys/fs/inotify does not exist.
     if [ "$(uname -s)" != "Linux" ]; then
@@ -232,15 +304,29 @@ else
         # Connect registry to the kind network so nodes can reach it by container name.
         ${CONTAINER_TOOL} network connect kind "${REG_NAME}" 2>/dev/null || true
 
+        # Get the registry's IP on the kind network for node /etc/hosts entries.
+        # Nodes inherit the host's /etc/hosts (which maps kind-registry to 127.0.0.1),
+        # but inside the node 127.0.0.1 is the node itself, not the registry.
+        REG_IP=$(${CONTAINER_TOOL} inspect "${REG_NAME}" --format '{{range $net, $conf := .NetworkSettings.Networks}}{{if eq $net "kind"}}{{$conf.IPAddress}}{{end}}{{end}}' 2>/dev/null)
+        if [ -z "${REG_IP}" ]; then
+            echo "  Warning: could not determine registry IP on kind network, falling back to container name."
+            REG_IP="${REG_NAME}"
+        fi
+
         # Configure containerd on each node to use the local registry (insecure/HTTP).
+        # Also fix /etc/hosts so kind-registry resolves to the registry container's
+        # kind-network IP, not 127.0.0.1 (which is inherited from the host).
         NODES_FOR_REG=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null)
         for node in ${NODES_FOR_REG}; do
             ${CONTAINER_TOOL} exec "$node" mkdir -p "/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}"
             ${CONTAINER_TOOL} exec "$node" bash -c "cat <<EOF >/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}/hosts.toml
 [host.\"http://${REG_NAME}:${REG_PORT}\"]
 EOF"
+            # Fix /etc/hosts: remove any 127.0.0.1 entry for the registry and add the correct IP.
+            # Use cp instead of sed -i because /etc/hosts is a mount and can't be renamed.
+            ${CONTAINER_TOOL} exec "$node" bash -c "grep -v '127.0.0.1.*${REG_NAME}' /etc/hosts > /tmp/hosts.new && echo '${REG_IP} ${REG_NAME}' >> /tmp/hosts.new && cp /tmp/hosts.new /etc/hosts && rm /tmp/hosts.new"
         done
-        echo "  Containerd configured on all nodes to use ${REG_NAME}:${REG_PORT}."
+        echo "  Containerd configured on all nodes to use ${REG_NAME}:${REG_PORT} (IP: ${REG_IP})."
     fi
 
     echo "=== Waiting for all nodes to be Ready ==="

@@ -111,6 +111,14 @@ _dev_find_ns = $(shell \
 
 ##@ Dev Environment
 
+.PHONY: dev-cluster-info
+dev-cluster-info: ## Show cluster version, connection info, and node status
+	@$(KUBECTL) version -o=yaml 2>/dev/null || $(KUBECTL) version
+	@echo ""
+	@$(KUBECTL) cluster-info
+	@echo ""
+	@$(KUBECTL) get nodes -o=wide
+
 .PHONY: dev-setup
 dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
 	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(KIND_HA)),--ha)
@@ -305,7 +313,7 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 			for deploy in $$($(KUBECTL) get deployment -n $$ns -l $$label --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
 				FOUND=true; \
 				echo "  Waiting for $$ns/$$deploy..."; \
-				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=120s || \
+				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=300s || \
 					echo "  Warning: $$ns/$$deploy is not ready."; \
 			done; \
 		done; \
@@ -314,6 +322,47 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 		echo "  No operator deployments found. Run 'make dev-deploy' first."; \
 		exit 1; \
 	fi
+	@echo "=== Waiting for operator daemonsets to be ready ==="
+	@for ns in $$($(KUBECTL) get daemonset -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+		for ds in $$($(KUBECTL) get daemonset -n $$ns --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -E 'remediation|maintenance|fence'); do \
+			echo "  Waiting for $$ns/$$ds..."; \
+			$(KUBECTL) rollout status daemonset/$$ds -n $$ns --timeout=300s || \
+				echo "  Warning: $$ns/$$ds is not ready."; \
+		done; \
+	done
+	@echo "=== Waiting for webhook endpoints to be ready ==="
+	@for ns in $$($(KUBECTL) get endpoints -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null | grep webhook | awk '{print $$1}' | sort -u); do \
+		for ep in $$($(KUBECTL) get endpoints -n $$ns --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep webhook); do \
+			echo "  Waiting for $$ns/$$ep..."; \
+			for i in $$(seq 1 30); do \
+				ADDRS=$$($(KUBECTL) get endpoints/$$ep -n $$ns -o jsonpath='{.subsets[0].addresses}' 2>/dev/null); \
+				if [ -n "$$ADDRS" ]; then \
+					echo "  $$ns/$$ep ready."; \
+					break; \
+				fi; \
+				sleep 2; \
+			done; \
+			if [ -z "$$ADDRS" ]; then \
+				echo "  Warning: $$ns/$$ep has no ready addresses after 60s."; \
+			fi; \
+		done; \
+	done
+	@echo "=== Cleaning up duplicate OLM webhook configurations ==="
+	@# When multiple operators are deployed in the same namespace via OLM,
+	@# OLM copies CSVs and creates duplicate webhook configurations that
+	@# point SNR webhook paths to other operators' services (which don't
+	@# serve them). Delete duplicates, keeping only the SNR-owned ones.
+	@for owner in $$($(KUBECTL) get csv -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | sort -u); do \
+		if echo "$$owner" | grep -q 'self-node-remediation'; then continue; fi; \
+		for wh in $$($(KUBECTL) get mutatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep selfnoderemediation); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+		for wh in $$($(KUBECTL) get validatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep selfnoderemediation); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+	done
 
 .PHONY: dev-events
 dev-events: ## Show recent events related to medik8s resources
@@ -438,6 +487,7 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-create-nhc         Create NodeHealthCheck CR (auto-detects remediator)"
 	@echo ""
 	@echo "Observe:"
+	@echo "  make dev-cluster-info       Show cluster version, connection, and nodes"
 	@echo "  make dev-logs               Tail operator logs"
 	@echo "  make dev-describe           Full summary (nodes, pods, CRs, leases, events)"
 	@echo "  make dev-summary            Remediation flow timeline"
