@@ -455,6 +455,17 @@ dev-reboot-watcher: ## Start background watcher that simulates node reboot on Ki
 dev-reboot-watcher-stop: ## Stop the background Kind reboot watcher
 	@pkill -f 'kind-reboot-watcher.sh' 2>/dev/null && echo "Reboot watcher stopped." || echo "No reboot watcher running."
 
+.PHONY: dev-webhook-watcher
+dev-webhook-watcher: ## Start background watcher that removes duplicate OLM webhook configurations
+	@$(DEV_DIR)/webhook-cleanup-watcher.sh &
+	@echo "Webhook cleanup watcher started in background (PID $$!)."
+	@echo "  It will remove duplicate webhook configs created by OLM."
+	@echo "  Use 'kill $$!' or 'make dev-webhook-watcher-stop' to stop."
+
+.PHONY: dev-webhook-watcher-stop
+dev-webhook-watcher-stop: ## Stop the background webhook cleanup watcher
+	@pkill -f 'webhook-cleanup-watcher.sh' 2>/dev/null && echo "Webhook cleanup watcher stopped." || echo "No webhook cleanup watcher running."
+
 .PHONY: dev-simulate-failure
 dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
 	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
@@ -535,6 +546,8 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-recover            Recover all workers"
 	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
 	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
+	@echo "  make dev-webhook-watcher    Start background watcher (removes OLM webhook duplicates)"
+	@echo "  make dev-webhook-watcher-stop Stop the webhook watcher"
 	@echo ""
 	@echo "CI:"
 	@echo "  make dev-ci-debug           Print debug info for CI failures"
