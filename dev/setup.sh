@@ -3,7 +3,7 @@
 # Creates a Kind cluster with 1 CP + 3 worker nodes, installs OLM,
 # and prepares the namespace for operator deployment.
 #
-# Usage: ./setup.sh [--skip-olm] [--name <cluster-name>]
+# Usage: ./setup.sh [--skip-olm] [--skip-registry] [--name <cluster-name>]
 
 set -euo pipefail
 
@@ -18,6 +18,9 @@ DEV_NS="${MEDIK8S_NAMESPACE:-medik8s-system}"
 INSTALL_OLM=true
 SKIP_KIND=false
 SKIP_INOTIFY_CHECK=false
+SKIP_REGISTRY="${SKIP_REGISTRY:-false}"
+REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
+REG_PORT="${MEDIK8S_REGISTRY_PORT:-5000}"
 KIND_HA="${KIND_HA:-false}"
 KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
 
@@ -34,6 +37,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-inotify-check)
             SKIP_INOTIFY_CHECK=true
+            shift
+            ;;
+        --skip-registry)
+            SKIP_REGISTRY=true
             shift
             ;;
         --ha)
@@ -54,9 +61,22 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --skip-kind           Skip Kind cluster creation (use existing cluster)"
             echo "  --skip-olm            Skip OLM installation"
+            echo "  --skip-registry       Skip local registry creation"
             echo "  --skip-inotify-check  Skip inotify limits check"
             echo "  --ha                  Use HA config (3 CP + 3 workers, for SNR CP testing)"
             echo "  --name                Kind cluster name (default: medik8s-dev)"
+            echo ""
+            echo "Environment variables:"
+            echo "  DEV_REGISTRY              Image delivery: 'registry' (local registry, default for Kind),"
+            echo "                            'local' (kind load, no registry), 'ttl.sh' (ephemeral push)"
+            echo "  MEDIK8S_REGISTRY_NAME     Local registry container name (default: kind-registry)"
+            echo "  MEDIK8S_REGISTRY_PORT     Local registry port (default: 5000)"
+            echo "  MEDIK8S_CLUSTER_NAME      Kind cluster name (default: medik8s-dev)"
+            echo "  MEDIK8S_NAMESPACE         Shared dev namespace (default: medik8s-system)"
+            echo "  CERT_MANAGER_VERSION      Cert-manager version (default: v1.17.2)"
+            echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
+            echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
+            echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
             exit 0
             ;;
         *)
@@ -193,6 +213,36 @@ else
         echo "=== Cluster '${CLUSTER_NAME}' already exists — skipping creation, re-applying configuration ==="
     fi
 
+    # Create local registry for OLM bundle deployment (unless skipped).
+    # The registry runs as a container on the host and is connected to the Kind
+    # network so that Kind nodes can pull images from it.
+    if [ "${SKIP_REGISTRY}" != true ]; then
+        echo "=== Setting up local registry '${REG_NAME}:${REG_PORT}' ==="
+        if ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
+            echo "  Registry container '${REG_NAME}' already exists."
+        else
+            ${CONTAINER_TOOL} run -d --restart=always \
+                -p "127.0.0.1:${REG_PORT}:5000" \
+                --network bridge \
+                --name "${REG_NAME}" \
+                registry:2
+            echo "  Registry container '${REG_NAME}' started on port ${REG_PORT}."
+        fi
+
+        # Connect registry to the kind network so nodes can reach it by container name.
+        ${CONTAINER_TOOL} network connect kind "${REG_NAME}" 2>/dev/null || true
+
+        # Configure containerd on each node to use the local registry (insecure/HTTP).
+        NODES_FOR_REG=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null)
+        for node in ${NODES_FOR_REG}; do
+            ${CONTAINER_TOOL} exec "$node" mkdir -p "/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}"
+            ${CONTAINER_TOOL} exec "$node" bash -c "cat <<EOF >/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}/hosts.toml
+[host.\"http://${REG_NAME}:${REG_PORT}\"]
+EOF"
+        done
+        echo "  Containerd configured on all nodes to use ${REG_NAME}:${REG_PORT}."
+    fi
+
     echo "=== Waiting for all nodes to be Ready ==="
     ${KUBECTL} wait --for=condition=Ready node --all --timeout=120s
 
@@ -278,6 +328,7 @@ echo ""
 echo "  Cluster:   ${CLUSTER_NAME}"
 echo "  Namespace: ${DEV_NS}"
 echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l) ($(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l) CP + $(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | wc -l) workers)"
+echo "  Registry:  $(${CONTAINER_TOOL} inspect "${REG_NAME}" >/dev/null 2>&1 && echo "${REG_NAME}:${REG_PORT}" || echo 'not running')"
 echo "  OLM:       $(${KUBECTL} get deployment -n olm olm-operator --no-headers >/dev/null 2>&1 && echo 'installed' || echo 'not installed')"
 echo ""
 echo "  Next steps:"

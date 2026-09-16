@@ -42,17 +42,27 @@ else
 endif
 
 # Image delivery:
-#   local:    loaded directly into Kind nodes (no registry, no pull)
-#   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required)
+#   registry: pushed to local Kind registry (default for Kind clusters)
+#             Required for OLM bundle deployment. Registry is created by dev-setup.
+#   local:    loaded directly into Kind nodes via kind load (no registry, no OLM bundle support)
+#   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required, for external clusters)
 #
-# Defaults to "local" for Kind clusters, "ttl.sh" for external.
-# Set DEV_REGISTRY=ttl.sh to force using ttl.sh even with Kind.
-DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),local,ttl.sh)
+# Defaults to "registry" for Kind clusters, "ttl.sh" for external.
+# Override with DEV_REGISTRY=local to use direct Kind image loading (no OLM bundle support).
+MEDIK8S_REGISTRY_NAME ?= kind-registry
+MEDIK8S_REGISTRY_PORT ?= 5000
+DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),registry,ttl.sh)
 TTL_SH_TTL ?= 2h
-ifeq ($(DEV_REGISTRY),local)
+ifeq ($(DEV_REGISTRY),registry)
+  DEV_IMG ?= $(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)/medik8s/$(OPERATOR_NAME):dev
+  # For pushing from host, use localhost since the registry is port-forwarded
+  DEV_IMG_PUSH ?= localhost:$(MEDIK8S_REGISTRY_PORT)/medik8s/$(OPERATOR_NAME):dev
+else ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
+  DEV_IMG_PUSH ?= $(DEV_IMG)
 else
   DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
+  DEV_IMG_PUSH ?= $(DEV_IMG)
 endif
 
 # Detect kubectl or oc
@@ -111,9 +121,9 @@ else
 endif
 
 .PHONY: dev-build
-dev-build: ## Build operator image and load into Kind or push to ttl.sh
-	@# For Kind: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
-	@# For external: keep imagePullPolicy as Always (image pulled from ttl.sh).
+dev-build: ## Build operator image and load into Kind or push to registry/ttl.sh
+	@# For local: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
+	@# For registry/ttl.sh: keep imagePullPolicy as Always (image pulled from registry).
 	@# The SNR controller reconciles DaemonSets from templates baked into the image,
 	@# so this must be done before the container build, not after.
 	@# Files are restored after build (even on failure) via trap.
@@ -134,6 +144,13 @@ ifeq ($(DEV_REGISTRY),local)
 	$(CONTAINER_TOOL) save -o "$$TMPTAR" $(DEV_IMG) && \
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
 		kind load image-archive "$$TMPTAR" --name $(MEDIK8S_CLUSTER_NAME)
+else ifeq ($(DEV_REGISTRY),registry)
+	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	@# Tag for localhost push (registry is port-forwarded to 127.0.0.1)
+	$(CONTAINER_TOOL) tag $(DEV_IMG) $(DEV_IMG_PUSH)
+	$(CONTAINER_TOOL) push $(DEV_IMG_PUSH)
+	@echo ""
+	@echo "  Image pushed to local registry: $(DEV_IMG)"
 else
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
 	$(CONTAINER_TOOL) push $(DEV_IMG)
@@ -213,12 +230,23 @@ dev-undeploy: ## Remove operator from dev cluster
 	fi
 
 .PHONY: dev-bundle-run
-dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk)
+dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk + local registry)
 	@if ! command -v operator-sdk >/dev/null 2>&1; then \
 		echo "Error: operator-sdk is required for bundle-run. Install from: https://sdk.operatorframework.io/docs/installation/"; \
 		exit 1; \
 	fi
+ifeq ($(DEV_REGISTRY),local)
+	@echo "Error: dev-bundle-run requires a registry (OLM pulls images from a registry)."
+	@echo "  Use DEV_REGISTRY=registry (default) or DEV_REGISTRY=ttl.sh."
+	@echo "  Or use 'make dev-deploy' for direct deployment without OLM."
+	@exit 1
+else ifeq ($(DEV_REGISTRY),registry)
+	$(MAKE) bundle bundle-build bundle-push bundle-run \
+		IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle \
+		IMAGE_REGISTRY=$(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)
+else
 	$(MAKE) bundle bundle-build bundle-push bundle-run IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle
+endif
 
 .PHONY: dev-bundle-cleanup
 dev-bundle-cleanup: ## Remove OLM bundle deployment
@@ -226,7 +254,8 @@ dev-bundle-cleanup: ## Remove OLM bundle deployment
 		echo "Error: operator-sdk is required for bundle-cleanup."; \
 		exit 1; \
 	fi
-	$(MAKE) bundle-cleanup BUNDLE_IMG=$(DEV_IMG)-bundle
+	$(MAKE) bundle-cleanup BUNDLE_IMG=$(DEV_IMG)-bundle \
+		$(if $(filter registry,$(DEV_REGISTRY)),IMAGE_REGISTRY=$(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT))
 
 .PHONY: dev-redeploy
 dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
@@ -351,11 +380,11 @@ dev-help: ## Show dev environment help
 	@echo "Medik8s Development Environment"
 	@echo ""
 	@echo "Lifecycle:"
-	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers)"
+	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers) + local registry"
 	@echo "  make dev-teardown           Destroy cluster"
 	@echo ""
 	@echo "Build & Deploy:"
-	@echo "  make dev-build              Build image and load into Kind"
+	@echo "  make dev-build              Build image and push to local registry"
 	@echo "  make dev-deploy             Build + install CRDs + deploy operator"
 	@echo "  make dev-redeploy           Rebuild and restart (fast iteration)"
 	@echo "  make dev-undeploy           Remove operator from cluster"
@@ -376,3 +405,15 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
 	@echo "  make dev-simulate-network   Block API server from a worker"
 	@echo "  make dev-recover            Recover all workers"
+	@echo ""
+	@echo "Configuration (environment variables):"
+	@echo "  DEV_REGISTRY=registry       Push to local Kind registry (default for Kind)"
+	@echo "  DEV_REGISTRY=local          Load directly into Kind nodes (no OLM bundle support)"
+	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
+	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
+	@echo "  SKIP_REGISTRY=true          Skip local registry creation in dev-setup"
+	@echo "  KIND_HA=true                HA config (3 CP + 3 workers)"
+	@echo "  MEDIK8S_CLUSTER_NAME=name   Kind cluster name (default: medik8s-dev)"
+	@echo "  MEDIK8S_REGISTRY_NAME=name  Registry container name (default: kind-registry)"
+	@echo "  MEDIK8S_REGISTRY_PORT=port  Registry port (default: 5000)"
+	@echo "  TTL_SH_TTL=2h              Image expiry on ttl.sh (default: 2h)"
