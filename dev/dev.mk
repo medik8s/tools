@@ -64,7 +64,8 @@ else ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
   DEV_IMG_PUSH ?= $(DEV_IMG)
 else
-  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
+  TTL_SH_SUFFIX := $(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8)
+  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(TTL_SH_SUFFIX):$(TTL_SH_TTL)
   DEV_IMG_PUSH ?= $(DEV_IMG)
 endif
 
