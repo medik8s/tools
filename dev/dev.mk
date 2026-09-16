@@ -12,16 +12,19 @@ MEDIK8S_NAMESPACE ?= medik8s-system
 TOOLS_DIR ?= $(shell cd .. && pwd)/tools
 DEV_DIR := $(TOOLS_DIR)/dev
 
-# CONTAINER_TOOL for dev targets: auto-detect docker/podman.
-# Use override to ensure dev targets use the same tool as setup.sh,
-# regardless of what the operator's Makefile sets.
+# CONTAINER_TOOL for dev targets: auto-detect docker/podman if not set.
+# Honors CONTAINER_TOOL from environment or make command line (e.g. CI uses
+# CONTAINER_TOOL=docker to avoid rootless podman issues on GitHub Actions).
+# The operator's Makefile may also set CONTAINER_TOOL; we respect that.
 # Must be defined before DEV_CLUSTER_TYPE which uses it for KIND_EXPERIMENTAL_PROVIDER.
-override CONTAINER_TOOL := $(shell \
-  if command -v podman >/dev/null 2>&1; then echo podman; \
-  elif command -v docker >/dev/null 2>&1; then echo docker; \
-  else echo ""; \
-  fi \
-)
+ifndef CONTAINER_TOOL
+  CONTAINER_TOOL := $(shell \
+    if command -v podman >/dev/null 2>&1; then echo podman; \
+    elif command -v docker >/dev/null 2>&1; then echo docker; \
+    else echo ""; \
+    fi \
+  )
+endif
 ifeq ($(CONTAINER_TOOL),)
   $(error No container tool found. Please install docker or podman.)
 endif
@@ -42,17 +45,27 @@ else
 endif
 
 # Image delivery:
-#   local:    loaded directly into Kind nodes (no registry, no pull)
-#   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required)
+#   registry: pushed to local Kind registry (default for Kind clusters)
+#             Required for OLM bundle deployment. Registry is created by dev-setup.
+#   local:    loaded directly into Kind nodes via kind load (no registry, no OLM bundle support)
+#   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required, for external clusters)
 #
-# Defaults to "local" for Kind clusters, "ttl.sh" for external.
-# Set DEV_REGISTRY=ttl.sh to force using ttl.sh even with Kind.
-DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),local,ttl.sh)
+# Defaults to "registry" for Kind clusters, "ttl.sh" for external.
+# Override with DEV_REGISTRY=local to use direct Kind image loading (no OLM bundle support).
+MEDIK8S_REGISTRY_NAME ?= kind-registry
+MEDIK8S_REGISTRY_PORT ?= 5000
+DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),registry,ttl.sh)
 TTL_SH_TTL ?= 2h
-ifeq ($(DEV_REGISTRY),local)
+ifeq ($(DEV_REGISTRY),registry)
+  DEV_IMG ?= $(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)/medik8s/$(OPERATOR_NAME):dev
+  # For pushing from host, use localhost since the registry is port-forwarded
+  DEV_IMG_PUSH ?= localhost:$(MEDIK8S_REGISTRY_PORT)/medik8s/$(OPERATOR_NAME):dev
+else ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
+  DEV_IMG_PUSH ?= $(DEV_IMG)
 else
   DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
+  DEV_IMG_PUSH ?= $(DEV_IMG)
 endif
 
 # Detect kubectl or oc
@@ -98,6 +111,14 @@ _dev_find_ns = $(shell \
 
 ##@ Dev Environment
 
+.PHONY: dev-cluster-info
+dev-cluster-info: ## Show cluster version, connection info, and node status
+	@$(KUBECTL) version -o=yaml 2>/dev/null || $(KUBECTL) version
+	@echo ""
+	@$(KUBECTL) cluster-info
+	@echo ""
+	@$(KUBECTL) get nodes -o=wide
+
 .PHONY: dev-setup
 dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
 	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(KIND_HA)),--ha)
@@ -111,9 +132,9 @@ else
 endif
 
 .PHONY: dev-build
-dev-build: ## Build operator image and load into Kind or push to ttl.sh
-	@# For Kind: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
-	@# For external: keep imagePullPolicy as Always (image pulled from ttl.sh).
+dev-build: ## Build operator image and load into Kind or push to registry/ttl.sh
+	@# For local: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
+	@# For registry/ttl.sh: keep imagePullPolicy as Always (image pulled from registry).
 	@# The SNR controller reconciles DaemonSets from templates baked into the image,
 	@# so this must be done before the container build, not after.
 	@# Files are restored after build (even on failure) via trap.
@@ -134,6 +155,13 @@ ifeq ($(DEV_REGISTRY),local)
 	$(CONTAINER_TOOL) save -o "$$TMPTAR" $(DEV_IMG) && \
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
 		kind load image-archive "$$TMPTAR" --name $(MEDIK8S_CLUSTER_NAME)
+else ifeq ($(DEV_REGISTRY),registry)
+	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	@# Tag for localhost push (registry is port-forwarded to 127.0.0.1)
+	$(CONTAINER_TOOL) tag $(DEV_IMG) $(DEV_IMG_PUSH)
+	$(CONTAINER_TOOL) push $(DEV_IMG_PUSH)
+	@echo ""
+	@echo "  Image pushed to local registry: $(DEV_IMG)"
 else
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
 	$(CONTAINER_TOOL) push $(DEV_IMG)
@@ -228,12 +256,23 @@ dev-undeploy: ## Remove operator from dev cluster
 	fi
 
 .PHONY: dev-bundle-run
-dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk)
+dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk + local registry)
 	@if ! command -v operator-sdk >/dev/null 2>&1; then \
 		echo "Error: operator-sdk is required for bundle-run. Install from: https://sdk.operatorframework.io/docs/installation/"; \
 		exit 1; \
 	fi
+ifeq ($(DEV_REGISTRY),local)
+	@echo "Error: dev-bundle-run requires a registry (OLM pulls images from a registry)."
+	@echo "  Use DEV_REGISTRY=registry (default) or DEV_REGISTRY=ttl.sh."
+	@echo "  Or use 'make dev-deploy' for direct deployment without OLM."
+	@exit 1
+else ifeq ($(DEV_REGISTRY),registry)
+	$(MAKE) bundle bundle-build bundle-push bundle-run \
+		IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle \
+		IMAGE_REGISTRY=$(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)
+else
 	$(MAKE) bundle bundle-build bundle-push bundle-run IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle
+endif
 
 .PHONY: dev-bundle-cleanup
 dev-bundle-cleanup: ## Remove OLM bundle deployment
@@ -241,7 +280,8 @@ dev-bundle-cleanup: ## Remove OLM bundle deployment
 		echo "Error: operator-sdk is required for bundle-cleanup."; \
 		exit 1; \
 	fi
-	$(MAKE) bundle-cleanup BUNDLE_IMG=$(DEV_IMG)-bundle
+	$(MAKE) bundle-cleanup BUNDLE_IMG=$(DEV_IMG)-bundle \
+		$(if $(filter registry,$(DEV_REGISTRY)),IMAGE_REGISTRY=$(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT))
 
 .PHONY: dev-redeploy
 dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
@@ -288,7 +328,7 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 			for deploy in $$($(KUBECTL) get deployment -n $$ns -l $$label --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
 				FOUND=true; \
 				echo "  Waiting for $$ns/$$deploy..."; \
-				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=120s || \
+				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=300s || \
 					echo "  Warning: $$ns/$$deploy is not ready."; \
 			done; \
 		done; \
@@ -297,6 +337,60 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 		echo "  No operator deployments found. Run 'make dev-deploy' first."; \
 		exit 1; \
 	fi
+	@echo "=== Waiting for operator daemonsets to be ready ==="
+	@for ns in $$($(KUBECTL) get daemonset -A --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+		for ds in $$($(KUBECTL) get daemonset -n $$ns --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -E 'remediation|maintenance|fence'); do \
+			echo "  Waiting for $$ns/$$ds..."; \
+			$(KUBECTL) rollout status daemonset/$$ds -n $$ns --timeout=300s || \
+				echo "  Warning: $$ns/$$ds is not ready."; \
+		done; \
+	done
+	@echo "=== Waiting for webhook endpoints to be ready ==="
+	@for ns in $$($(KUBECTL) get endpoints -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null | grep webhook | awk '{print $$1}' | sort -u); do \
+		for ep in $$($(KUBECTL) get endpoints -n $$ns --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep webhook); do \
+			echo "  Waiting for $$ns/$$ep..."; \
+			for i in $$(seq 1 30); do \
+				ADDRS=$$($(KUBECTL) get endpoints/$$ep -n $$ns -o jsonpath='{.subsets[0].addresses}' 2>/dev/null); \
+				if [ -n "$$ADDRS" ]; then \
+					echo "  $$ns/$$ep ready."; \
+					break; \
+				fi; \
+				sleep 2; \
+			done; \
+			if [ -z "$$ADDRS" ]; then \
+				echo "  Warning: $$ns/$$ep has no ready addresses after 60s."; \
+			fi; \
+		done; \
+	done
+	@echo "=== Cleaning up duplicate OLM webhook configurations ==="
+	@# When multiple operators are deployed in the same namespace via OLM,
+	@# OLM copies CSVs and creates duplicate webhook configurations that
+	@# point webhook paths to wrong services. For each operator, delete
+	@# webhook configs owned by other operators' CSVs.
+	@# SNR webhooks should only be owned by SNR CSV
+	@for owner in $$($(KUBECTL) get csv -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | sort -u); do \
+		if echo "$$owner" | grep -q 'self-node-remediation'; then continue; fi; \
+		for wh in $$($(KUBECTL) get mutatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep selfnoderemediation); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+		for wh in $$($(KUBECTL) get validatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep selfnoderemediation); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+	done
+	@# NHC webhooks should only be owned by NHC CSV
+	@for owner in $$($(KUBECTL) get csv -A --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | sort -u); do \
+		if echo "$$owner" | grep -q 'node-healthcheck'; then continue; fi; \
+		for wh in $$($(KUBECTL) get mutatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep nodehealthcheck); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+		for wh in $$($(KUBECTL) get validatingwebhookconfigurations -l olm.owner=$$owner -o name 2>/dev/null | grep nodehealthcheck); do \
+			echo "  Deleting duplicate: $$wh (owner: $$owner)"; \
+			$(KUBECTL) delete "$$wh" 2>/dev/null || true; \
+		done; \
+	done
 
 .PHONY: dev-events
 dev-events: ## Show recent events related to medik8s resources
@@ -345,6 +439,17 @@ dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worke
 dev-create-nhc: ## Create a NodeHealthCheck CR that triggers SNR remediation
 	@$(DEV_DIR)/create-nhc.sh
 
+.PHONY: dev-reboot-watcher
+dev-reboot-watcher: ## Start background watcher that simulates node reboot on Kind (restarts container when kubelet stops)
+	@$(DEV_DIR)/kind-reboot-watcher.sh &
+	@echo "Reboot watcher started in background (PID $$!)."
+	@echo "  It will restart Kind node containers when kubelet stops."
+	@echo "  Use 'kill $$!' or 'make dev-reboot-watcher-stop' to stop."
+
+.PHONY: dev-reboot-watcher-stop
+dev-reboot-watcher-stop: ## Stop the background Kind reboot watcher
+	@pkill -f 'kind-reboot-watcher.sh' 2>/dev/null && echo "Reboot watcher stopped." || echo "No reboot watcher running."
+
 .PHONY: dev-simulate-failure
 dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
 	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
@@ -361,16 +466,47 @@ dev-simulate-network: ## Block API server from a worker to test SNR peer health
 dev-recover: ## Recover all workers (restart kubelet, restore network, clean CRs)
 	@$(DEV_DIR)/simulate-failure.sh recover
 
+.PHONY: dev-ci-debug
+dev-ci-debug: ## Print debug info for CI failures (OLM status, deployments, pods, logs, events)
+	@echo "=== OLM Status ==="
+	@$(KUBECTL) get -A OperatorGroup -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A CatalogSource -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A Subscription -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A ClusterServiceVersion -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A InstallPlan -o wide 2>/dev/null || true
+	@echo ""
+	@echo "=== Deployments and Pods ==="
+	@for ns in $$($(KUBECTL) get namespaces --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -vE '^(kube-|default|local-path)'); do \
+		RESOURCES=$$($(KUBECTL) get deployments,daemonsets,pods -n $$ns --no-headers 2>/dev/null); \
+		if [ -n "$$RESOURCES" ]; then \
+			echo "--- Namespace: $$ns ---"; \
+			$(KUBECTL) get deployments,daemonsets,pods -n $$ns -o wide 2>/dev/null; \
+			echo ""; \
+		fi; \
+	done
+	@echo "=== Controller Logs ==="
+	@for label in control-plane=controller-manager app.kubernetes.io/component=controller-manager; do \
+		for ns in $$($(KUBECTL) get pods -A -l $$label --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+			for pod in $$($(KUBECTL) get pods -n $$ns -l $$label --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
+				echo "--- $$ns/$$pod ---"; \
+				$(KUBECTL) logs -n $$ns $$pod --all-containers --tail=200 2>/dev/null || true; \
+				echo ""; \
+			done; \
+		done; \
+	done
+	@echo "=== Recent Events ==="
+	@$(KUBECTL) get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -30
+
 .PHONY: dev-help
 dev-help: ## Show dev environment help
 	@echo "Medik8s Development Environment"
 	@echo ""
 	@echo "Lifecycle:"
-	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers)"
+	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers) + local registry"
 	@echo "  make dev-teardown           Destroy cluster"
 	@echo ""
 	@echo "Build & Deploy:"
-	@echo "  make dev-build              Build image and load into Kind"
+	@echo "  make dev-build              Build image and push to local registry"
 	@echo "  make dev-deploy             Build + install CRDs + deploy operator"
 	@echo "  make dev-redeploy           Rebuild and restart (fast iteration)"
 	@echo "  make dev-undeploy           Remove operator from cluster"
@@ -379,6 +515,7 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-create-nhc         Create NodeHealthCheck CR (auto-detects remediator)"
 	@echo ""
 	@echo "Observe:"
+	@echo "  make dev-cluster-info       Show cluster version, connection, and nodes"
 	@echo "  make dev-logs               Tail operator logs"
 	@echo "  make dev-describe           Full summary (nodes, pods, CRs, leases, events)"
 	@echo "  make dev-summary            Remediation flow timeline"
@@ -391,3 +528,20 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
 	@echo "  make dev-simulate-network   Block API server from a worker"
 	@echo "  make dev-recover            Recover all workers"
+	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
+	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
+	@echo ""
+	@echo "CI:"
+	@echo "  make dev-ci-debug           Print debug info for CI failures"
+	@echo ""
+	@echo "Configuration (environment variables):"
+	@echo "  DEV_REGISTRY=registry       Push to local Kind registry (default for Kind)"
+	@echo "  DEV_REGISTRY=local          Load directly into Kind nodes (no OLM bundle support)"
+	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
+	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
+	@echo "  SKIP_REGISTRY=true          Skip local registry creation in dev-setup"
+	@echo "  KIND_HA=true                HA config (3 CP + 3 workers)"
+	@echo "  MEDIK8S_CLUSTER_NAME=name   Kind cluster name (default: medik8s-dev)"
+	@echo "  MEDIK8S_REGISTRY_NAME=name  Registry container name (default: kind-registry)"
+	@echo "  MEDIK8S_REGISTRY_PORT=port  Registry port (default: 5000)"
+	@echo "  TTL_SH_TTL=2h              Image expiry on ttl.sh (default: 2h)"
