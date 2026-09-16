@@ -359,6 +359,17 @@ dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worke
 dev-create-nhc: ## Create a NodeHealthCheck CR that triggers SNR remediation
 	@$(DEV_DIR)/create-nhc.sh
 
+.PHONY: dev-reboot-watcher
+dev-reboot-watcher: ## Start background watcher that simulates node reboot on Kind (restarts container when kubelet stops)
+	@$(DEV_DIR)/kind-reboot-watcher.sh &
+	@echo "Reboot watcher started in background (PID $$!)."
+	@echo "  It will restart Kind node containers when kubelet stops."
+	@echo "  Use 'kill $$!' or 'make dev-reboot-watcher-stop' to stop."
+
+.PHONY: dev-reboot-watcher-stop
+dev-reboot-watcher-stop: ## Stop the background Kind reboot watcher
+	@pkill -f 'kind-reboot-watcher.sh' 2>/dev/null && echo "Reboot watcher stopped." || echo "No reboot watcher running."
+
 .PHONY: dev-simulate-failure
 dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
 	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
@@ -374,6 +385,37 @@ dev-simulate-network: ## Block API server from a worker to test SNR peer health
 .PHONY: dev-recover
 dev-recover: ## Recover all workers (restart kubelet, restore network, clean CRs)
 	@$(DEV_DIR)/simulate-failure.sh recover
+
+.PHONY: dev-ci-debug
+dev-ci-debug: ## Print debug info for CI failures (OLM status, deployments, pods, logs, events)
+	@echo "=== OLM Status ==="
+	@$(KUBECTL) get -A OperatorGroup -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A CatalogSource -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A Subscription -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A ClusterServiceVersion -o wide 2>/dev/null || true
+	@$(KUBECTL) get -A InstallPlan -o wide 2>/dev/null || true
+	@echo ""
+	@echo "=== Deployments and Pods ==="
+	@for ns in $$($(KUBECTL) get namespaces --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -vE '^(kube-|default|local-path)'); do \
+		RESOURCES=$$($(KUBECTL) get deployments,daemonsets,pods -n $$ns --no-headers 2>/dev/null); \
+		if [ -n "$$RESOURCES" ]; then \
+			echo "--- Namespace: $$ns ---"; \
+			$(KUBECTL) get deployments,daemonsets,pods -n $$ns -o wide 2>/dev/null; \
+			echo ""; \
+		fi; \
+	done
+	@echo "=== Controller Logs ==="
+	@for label in control-plane=controller-manager app.kubernetes.io/component=controller-manager; do \
+		for ns in $$($(KUBECTL) get pods -A -l $$label --no-headers -o custom-columns=NS:.metadata.namespace 2>/dev/null | sort -u); do \
+			for pod in $$($(KUBECTL) get pods -n $$ns -l $$label --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do \
+				echo "--- $$ns/$$pod ---"; \
+				$(KUBECTL) logs -n $$ns $$pod --all-containers --tail=50 2>/dev/null || true; \
+				echo ""; \
+			done; \
+		done; \
+	done
+	@echo "=== Recent Events ==="
+	@$(KUBECTL) get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -30
 
 .PHONY: dev-help
 dev-help: ## Show dev environment help
@@ -405,6 +447,11 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
 	@echo "  make dev-simulate-network   Block API server from a worker"
 	@echo "  make dev-recover            Recover all workers"
+	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
+	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
+	@echo ""
+	@echo "CI:"
+	@echo "  make dev-ci-debug           Print debug info for CI failures"
 	@echo ""
 	@echo "Configuration (environment variables):"
 	@echo "  DEV_REGISTRY=registry       Push to local Kind registry (default for Kind)"
