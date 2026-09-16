@@ -89,7 +89,7 @@ Rootless podman requires `cpuset` cgroup delegation for Kind worker nodes. Witho
 
 ```bash
 sudo mkdir -p /etc/systemd/system/user@.service.d
-sudo tee /etc/systemd/system/user@.service.d/delegate.conf <<EOF
+sudo tee /etc/systemd/system/user@.service.d/delegate.conf << "EOF"
 [Service]
 Delegate=cpu cpuset io memory pids
 EOF
