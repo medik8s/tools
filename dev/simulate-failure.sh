@@ -97,6 +97,8 @@ if [ "${EXTERNAL_CLUSTER}" = true ]; then
                 echo "  ${KUBECTL} get fenceagentsremediation -A -w"
             ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.medik8s.io &>/dev/null && \
                 echo "  ${KUBECTL} get machinedeletionremediation -A -w"
+            ${KUBECTL} get crd storagebasedremediations.storage-based-remediation.medik8s.io &>/dev/null && \
+                echo "  ${KUBECTL} get storagebasedremediation -A -w"
             echo ""
             echo "On OpenShift, SNR will automatically reboot the node — no manual recovery needed."
             ;;
@@ -274,6 +276,8 @@ case "$SCENARIO" in
                 REMAINING=$((REMAINING + $(${KUBECTL} get fenceagentsremediation -A --no-headers 2>/dev/null | wc -l)))
             ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.medik8s.io &>/dev/null && \
                 REMAINING=$((REMAINING + $(${KUBECTL} get machinedeletionremediation -A --no-headers 2>/dev/null | wc -l)))
+            ${KUBECTL} get crd storagebasedremediations.storage-based-remediation.medik8s.io &>/dev/null && \
+                REMAINING=$((REMAINING + $(${KUBECTL} get storagebasedremediation -A --no-headers 2>/dev/null | wc -l)))
             if [ "$REMAINING" -eq 0 ]; then
                 break
             fi

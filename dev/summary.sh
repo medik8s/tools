@@ -34,11 +34,17 @@ echo ""
 echo "--- Active Remediation CRs ---"
 SNRS_OUT=$(${KUBECTL} get selfnoderemediation -A --no-headers 2>/dev/null || true)
 FARS_OUT=$(${KUBECTL} get fenceagentsremediation -A --no-headers 2>/dev/null || true)
+MDRS_OUT=$(${KUBECTL} get machinedeletionremediation -A --no-headers 2>/dev/null || true)
+SBRS_OUT=$(${KUBECTL} get storagebasedremediation -A --no-headers 2>/dev/null || true)
 [ -n "$SNRS_OUT" ] && echo "$SNRS_OUT" | awk '{print "  " $2 " (ns: " $1 ")"}'
 [ -n "$FARS_OUT" ] && echo "$FARS_OUT" | awk '{print "  " $2 " (ns: " $1 ")"}'
+[ -n "$MDRS_OUT" ] && echo "$MDRS_OUT" | awk '{print "  " $2 " (ns: " $1 ")"}'
+[ -n "$SBRS_OUT" ] && echo "$SBRS_OUT" | awk '{print "  " $2 " (ns: " $1 ")"}'
 SNRS=$(echo "$SNRS_OUT" | grep -c . || true)
 FARS=$(echo "$FARS_OUT" | grep -c . || true)
-if [ "$SNRS" -eq 0 ] && [ "$FARS" -eq 0 ]; then
+MDRS=$(echo "$MDRS_OUT" | grep -c . || true)
+SBRS=$(echo "$SBRS_OUT" | grep -c . || true)
+if [ "$SNRS" -eq 0 ] && [ "$FARS" -eq 0 ] && [ "$MDRS" -eq 0 ] && [ "$SBRS" -eq 0 ]; then
     echo "  (none — all remediation completed)"
 fi
 echo ""

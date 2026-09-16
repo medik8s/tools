@@ -94,6 +94,25 @@ if ${KUBECTL} get crd machinedeletionremediations.machine-deletion-remediation.m
     echo ""
 fi
 
+# StorageBasedRemediation
+if ${KUBECTL} get crd storagebasedremediations.storage-based-remediation.medik8s.io >/dev/null 2>&1; then
+    echo "--- StorageBasedRemediation ---"
+    if ${KUBECTL} get storagebasedremediation -A --no-headers 2>/dev/null | grep -q .; then
+        ${KUBECTL} get storagebasedremediation -A 2>/dev/null | head -10
+    else
+        echo "  (none)"
+    fi
+    echo ""
+    echo "  Templates:"
+    ${KUBECTL} get storagebasedremediationtemplate -A --no-headers 2>/dev/null \
+        | awk '{print "    " $2 " (ns: " $1 ")"}' || echo "    (none)"
+    echo ""
+    echo "  Config:"
+    ${KUBECTL} get storagebasedremediationconfig -A --no-headers 2>/dev/null \
+        | awk '{print "    " $2 " (ns: " $1 ")"}' || echo "    (none)"
+    echo ""
+fi
+
 # NodeMaintenance
 if ${KUBECTL} get crd nodemaintenances.nodemaintenance.medik8s.io >/dev/null 2>&1; then
     echo "--- NodeMaintenance ---"
