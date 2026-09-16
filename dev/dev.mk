@@ -55,6 +55,10 @@ endif
 MEDIK8S_REGISTRY_NAME ?= kind-registry
 MEDIK8S_REGISTRY_PORT ?= 5000
 DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),registry,ttl.sh)
+
+# Target platform for images to build
+DEV_PLATFORM ?= linux/amd64
+DEV_PLATFORM_FLAG := $(if $(DEV_PLATFORM),--platform=$(DEV_PLATFORM))
 TTL_SH_TTL ?= 2h
 ifeq ($(DEV_REGISTRY),registry)
   DEV_IMG ?= $(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)/medik8s/$(OPERATOR_NAME):dev
@@ -64,7 +68,8 @@ else ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
   DEV_IMG_PUSH ?= $(DEV_IMG)
 else
-  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8):$(TTL_SH_TTL)
+  TTL_SH_SUFFIX := $(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8)
+  DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(TTL_SH_SUFFIX):$(TTL_SH_TTL)
   DEV_IMG_PUSH ?= $(DEV_IMG)
 endif
 
@@ -163,10 +168,10 @@ else ifeq ($(DEV_REGISTRY),registry)
 	@echo ""
 	@echo "  Image pushed to local registry: $(DEV_IMG)"
 else
-	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -t $(DEV_IMG) .
 	$(CONTAINER_TOOL) push $(DEV_IMG)
 	@echo ""
-	@echo "  Image pushed to $(DEV_IMG)"
+	@echo "  Image pushed to $(DEV_IMG) ($(if $(DEV_PLATFORM),$(DEV_PLATFORM),native))"
 	@echo "  Image will expire after $(TTL_SH_TTL)."
 endif
 
