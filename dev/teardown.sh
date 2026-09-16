@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
+REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -42,4 +43,10 @@ elif ${KUBECTL} cluster-info --context "kind-${CLUSTER_NAME}" >/dev/null 2>&1; t
     exit 1
 else
     echo "Cluster '${CLUSTER_NAME}' does not exist."
+fi
+
+# Clean up local registry container if it exists
+if ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
+    echo "=== Removing local registry '${REG_NAME}' ==="
+    ${CONTAINER_TOOL} rm -f "${REG_NAME}"
 fi
