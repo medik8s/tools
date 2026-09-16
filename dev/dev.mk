@@ -12,16 +12,19 @@ MEDIK8S_NAMESPACE ?= medik8s-system
 TOOLS_DIR ?= $(shell cd .. && pwd)/tools
 DEV_DIR := $(TOOLS_DIR)/dev
 
-# CONTAINER_TOOL for dev targets: auto-detect docker/podman.
-# Use override to ensure dev targets use the same tool as setup.sh,
-# regardless of what the operator's Makefile sets.
+# CONTAINER_TOOL for dev targets: auto-detect docker/podman if not set.
+# Honors CONTAINER_TOOL from environment or make command line (e.g. CI uses
+# CONTAINER_TOOL=docker to avoid rootless podman issues on GitHub Actions).
+# The operator's Makefile may also set CONTAINER_TOOL; we respect that.
 # Must be defined before DEV_CLUSTER_TYPE which uses it for KIND_EXPERIMENTAL_PROVIDER.
-override CONTAINER_TOOL := $(shell \
-  if command -v podman >/dev/null 2>&1; then echo podman; \
-  elif command -v docker >/dev/null 2>&1; then echo docker; \
-  else echo ""; \
-  fi \
-)
+ifndef CONTAINER_TOOL
+  CONTAINER_TOOL := $(shell \
+    if command -v podman >/dev/null 2>&1; then echo podman; \
+    elif command -v docker >/dev/null 2>&1; then echo docker; \
+    else echo ""; \
+    fi \
+  )
+endif
 ifeq ($(CONTAINER_TOOL),)
   $(error No container tool found. Please install docker or podman.)
 endif
