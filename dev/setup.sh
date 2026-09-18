@@ -350,14 +350,16 @@ EOF"
     fi
 
     echo "=== Loading softdog kernel module on worker nodes (for SNR/SBR watchdog) ==="
+    echo "  Using soft_noboot=1 so the watchdog fires harmlessly (no real reboot)."
+    echo "  The reboot watcher (make dev-reboot-watcher) handles Kind container restarts."
     NODES=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null)
     if [ -z "${NODES}" ]; then
         NODES=$(${KUBECTL} get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null)
     fi
     for node in ${NODES}; do
         if echo "$node" | grep -q 'worker'; then
-            ${CONTAINER_TOOL} exec "$node" modprobe softdog 2>/dev/null && \
-                echo "  softdog loaded on $node" || \
+            ${CONTAINER_TOOL} exec "$node" modprobe softdog soft_noboot=1 2>/dev/null && \
+                echo "  softdog (noboot) loaded on $node" || \
                 echo "  Warning: could not load softdog on $node (SNR/SBR watchdog reboot testing will be limited)"
         fi
     done
