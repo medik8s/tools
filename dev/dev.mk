@@ -125,7 +125,7 @@ dev-cluster-info: ## Show cluster version, connection info, and node status
 	@$(KUBECTL) get nodes -o=wide
 
 .PHONY: dev-setup
-dev-setup: ## Create Kind cluster and configure dependencies (use SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
+dev-setup: ## Create Kind cluster and configure dependencies (SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
 	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(KIND_HA)),--ha)
 
 .PHONY: dev-teardown
@@ -216,8 +216,10 @@ dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, i
 		fi; \
 		if [ -n "$$DEPLOY" ]; then \
 			echo "=== Waiting for operator deployment to be ready ==="; \
-			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
+			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=300s || \
 				{ echo "Error: deployment $$DEPLOY is not ready. Check logs with 'make dev-logs'."; exit 1; }; \
+			echo "=== Waiting 15s for operator webhooks to stabilize ==="; \
+			sleep 15; \
 		fi; \
 	else \
 		echo "  Warning: could not detect operator namespace. Skipping cert-manager setup."; \
@@ -300,7 +302,7 @@ dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods
 			DEPLOY=$$($(KUBECTL) get deployment -n $$NS -l app.kubernetes.io/component=controller-manager --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1); \
 		fi; \
 		if [ -n "$$DEPLOY" ]; then \
-			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=120s || \
+			$(KUBECTL) wait --for=condition=Available deployment/$$DEPLOY -n $$NS --timeout=300s || \
 				echo "Warning: deployment is not ready. Check logs with 'make dev-logs'."; \
 		fi; \
 	else \
@@ -444,34 +446,12 @@ dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worke
 dev-create-nhc: ## Create a NodeHealthCheck CR that triggers SNR remediation
 	@$(DEV_DIR)/create-nhc.sh
 
-.PHONY: dev-reboot-watcher
-dev-reboot-watcher: ## Start background watcher that simulates node reboot on Kind (restarts container when kubelet stops)
-	@$(DEV_DIR)/kind-reboot-watcher.sh &
-	@echo "Reboot watcher started in background (PID $$!)."
-	@echo "  It will restart Kind node containers when kubelet stops."
-	@echo "  Use 'kill $$!' or 'make dev-reboot-watcher-stop' to stop."
-
-.PHONY: dev-reboot-watcher-stop
-dev-reboot-watcher-stop: ## Stop the background Kind reboot watcher
-	@pkill -f 'kind-reboot-watcher.sh' 2>/dev/null && echo "Reboot watcher stopped." || echo "No reboot watcher running."
-
-.PHONY: dev-webhook-watcher
-dev-webhook-watcher: ## Start background watcher that removes duplicate OLM webhook configurations
-	@$(DEV_DIR)/webhook-cleanup-watcher.sh &
-	@echo "Webhook cleanup watcher started in background (PID $$!)."
-	@echo "  It will remove duplicate webhook configs created by OLM."
-	@echo "  Use 'kill $$!' or 'make dev-webhook-watcher-stop' to stop."
-
-.PHONY: dev-webhook-watcher-stop
-dev-webhook-watcher-stop: ## Stop the background webhook cleanup watcher
-	@pkill -f 'webhook-cleanup-watcher.sh' 2>/dev/null && echo "Webhook cleanup watcher stopped." || echo "No webhook cleanup watcher running."
-
 .PHONY: dev-simulate-failure
 dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
 	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
 
 .PHONY: dev-simulate-storm
-dev-simulate-storm: ## Simulate storm: stop kubelet on 2 workers
+dev-simulate-storm: ## Simulate storm: stop kubelet on 2 workers (requires 3 workers, the default)
 	@$(DEV_DIR)/simulate-failure.sh storm
 
 .PHONY: dev-simulate-network
@@ -544,10 +524,6 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
 	@echo "  make dev-simulate-network   Block API server from a worker"
 	@echo "  make dev-recover            Recover all workers"
-	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
-	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
-	@echo "  make dev-webhook-watcher    Start background watcher (removes OLM webhook duplicates)"
-	@echo "  make dev-webhook-watcher-stop Stop the webhook watcher"
 	@echo ""
 	@echo "CI:"
 	@echo "  make dev-ci-debug           Print debug info for CI failures"

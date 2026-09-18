@@ -1,6 +1,7 @@
 # Kind cluster configuration for medik8s development
-# Creates 1 control-plane + 3 worker nodes.
+# Creates 1 control-plane + 3 worker nodes (default).
 # SNR requires 2+ workers for peer health checks.
+# 3 workers enables storm simulation (2 fail, 1 healthy).
 # Single CP is sufficient for development; multi-CP etcd quorum testing
 # requires a real OpenShift cluster.
 kind: Cluster
