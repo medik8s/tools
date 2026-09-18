@@ -446,6 +446,17 @@ dev-shell: ## Open a shell on a Kind node (use NODE=<name>, default: first worke
 dev-create-nhc: ## Create a NodeHealthCheck CR that triggers SNR remediation
 	@$(DEV_DIR)/create-nhc.sh
 
+.PHONY: dev-reboot-watcher
+dev-reboot-watcher: ## Start background watcher that simulates node reboot on Kind (restarts container when kubelet stops)
+	@$(DEV_DIR)/kind-reboot-watcher.sh &
+	@echo "Reboot watcher started in background (PID $$!)."
+	@echo "  It will restart Kind node containers when kubelet stops."
+	@echo "  Use 'kill $$!' or 'make dev-reboot-watcher-stop' to stop."
+
+.PHONY: dev-reboot-watcher-stop
+dev-reboot-watcher-stop: ## Stop the background Kind reboot watcher
+	@pkill -f 'kind-reboot-watcher.sh' 2>/dev/null && echo "Reboot watcher stopped." || echo "No reboot watcher running."
+
 .PHONY: dev-simulate-failure
 dev-simulate-failure: ## Stop kubelet on a worker to trigger remediation (use SCENARIO= for other scenarios)
 	@$(DEV_DIR)/simulate-failure.sh $(or $(SCENARIO),kubelet-stop)
@@ -524,6 +535,8 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-simulate-storm     Stop kubelet on 2 workers (storm test)"
 	@echo "  make dev-simulate-network   Block API server from a worker"
 	@echo "  make dev-recover            Recover all workers"
+	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
+	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
 	@echo ""
 	@echo "CI:"
 	@echo "  make dev-ci-debug           Print debug info for CI failures"
