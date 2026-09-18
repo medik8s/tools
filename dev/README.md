@@ -150,7 +150,7 @@ All `dev-*` targets are now available.
 
 ## What It Creates
 
-- **1 control-plane + 3 worker nodes** (SNR needs 2+ workers for peer health; use `KIND_HA=true` for 3 CP + 3 workers)
+- **1 control-plane + 3 worker nodes** (SNR needs 2+ workers for peer health, 3 enables storm simulation; use `KIND_HA=true` for 3 CP + 3 workers)
 - **Worker labels** (`node-role.kubernetes.io/worker`)
 - **softdog** kernel module on workers (for SNR/SBR watchdog testing)
 - **Namespaces**: `medik8s-system` (privileged PSA) and `medik8s-leases` for shared resources
@@ -168,7 +168,7 @@ Re-running `make dev-setup` on an existing cluster is safe — it re-applies con
 |---------|-------------|
 | `make dev-simulate-failure` | Stop kubelet on a worker → node goes NotReady → NHC creates remediation CR |
 | `make dev-simulate-network` | Block API server from a worker → tests SNR peer health decisions |
-| `make dev-simulate-storm` | Stop kubelet on 2/3 workers → NHC detects storm, pauses remediation |
+| `make dev-simulate-storm` | Stop kubelet on 2 workers → NHC detects storm, pauses remediation (requires 3 workers, the default) |
 | `make dev-recover` | Restart kubelet, restore network, clean up CRs |
 
 ### Kind vs OpenShift recovery
