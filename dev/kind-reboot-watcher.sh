@@ -6,8 +6,14 @@
 # doesn't work because Kind nodes are containers sharing the host kernel.
 #
 # This script watches worker nodes and when one becomes NotReady (kubelet
-# stopped), it waits a configurable delay then restarts the Kind container,
-# which brings kubelet back — simulating what a real reboot does.
+# stopped), it waits for a SelfNodeRemediation CR to be created for that node,
+# then restarts the Kind container — simulating what a real reboot does.
+# This ensures NHC has detected the unhealthy node and triggered remediation
+# before the reboot happens, avoiding races with controller leader failover.
+#
+# A configurable timeout (--delay) acts as a safety fallback: if no CR appears
+# within that time, the container is restarted anyway to prevent the test from
+# hanging indefinitely.
 #
 # Usage:
 #   ./kind-reboot-watcher.sh [--name <cluster>] [--delay <seconds>] [--once]
@@ -23,7 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
-REBOOT_DELAY="${MEDIK8S_REBOOT_DELAY:-30}"
+REBOOT_DELAY="${MEDIK8S_REBOOT_DELAY:-300}"
+CR_POLL_INTERVAL=5
 POLL_INTERVAL=5
 ONCE=false
 
@@ -40,12 +47,12 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --name <cluster>   Kind cluster name (default: medik8s-dev)"
-            echo "  --delay <seconds>  Wait before restarting container (default: 30)"
+            echo "  --delay <seconds>  Max wait for remediation CR before forced reboot (default: 300)"
             echo "  --once             Exit after first reboot (for CI)"
             echo ""
             echo "Environment variables:"
             echo "  MEDIK8S_CLUSTER_NAME    Cluster name (default: medik8s-dev)"
-            echo "  MEDIK8S_REBOOT_DELAY    Reboot delay in seconds (default: 30)"
+            echo "  MEDIK8S_REBOOT_DELAY    Max wait for CR in seconds (default: 300)"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -55,8 +62,9 @@ done
 # Track nodes that are currently being "rebooted" to avoid double-restart
 declare -A REBOOTING
 
-echo "[reboot-watcher] Watching Kind cluster '${CLUSTER_NAME}' (delay: ${REBOOT_DELAY}s)"
+echo "[reboot-watcher] Watching Kind cluster '${CLUSTER_NAME}' (timeout: ${REBOOT_DELAY}s)"
 echo "[reboot-watcher] Container tool: ${CONTAINER_TOOL}"
+echo "[reboot-watcher] Will wait for SelfNodeRemediation CR before restarting nodes."
 
 # Get list of worker node containers
 get_worker_nodes() {
@@ -76,6 +84,31 @@ is_node_not_ready() {
     local status
     status=$(${KUBECTL} get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
     [[ "$status" != "True" ]]
+}
+
+# Check if a SelfNodeRemediation CR exists for a given node.
+# SNR CRs are named after the node and can be in any namespace.
+has_remediation_cr() {
+    local node="$1"
+    ${KUBECTL} get selfnoderemediation -A --field-selector="metadata.name=${node}" \
+        --no-headers 2>/dev/null | grep -q .
+}
+
+# Wait for a SelfNodeRemediation CR to appear for the node, or until timeout.
+# Returns 0 if CR found, 1 if timed out.
+wait_for_remediation_cr() {
+    local node="$1"
+    local timeout="$2"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if has_remediation_cr "$node"; then
+            return 0
+        fi
+        sleep "$CR_POLL_INTERVAL"
+        elapsed=$((elapsed + CR_POLL_INTERVAL))
+    done
+    return 1
 }
 
 while true; do
@@ -105,13 +138,16 @@ while true; do
         # Detect stopped kubelet (node becoming NotReady)
         if is_node_not_ready "$node" && ! is_kubelet_running "$node"; then
             echo "[reboot-watcher] $node: kubelet stopped, NotReady detected."
-            echo "[reboot-watcher] $node: waiting ${REBOOT_DELAY}s before simulated reboot..."
+            echo "[reboot-watcher] $node: waiting for SelfNodeRemediation CR (timeout: ${REBOOT_DELAY}s)..."
             REBOOTING[$node]=1
 
-            # Restart in background so we keep watching other nodes
+            # Wait for CR then restart in background so we keep watching other nodes
             (
-                sleep "$REBOOT_DELAY"
-                echo "[reboot-watcher] $node: restarting container (simulated reboot)..."
+                if wait_for_remediation_cr "$node" "$REBOOT_DELAY"; then
+                    echo "[reboot-watcher] $node: SelfNodeRemediation CR found, restarting container..."
+                else
+                    echo "[reboot-watcher] $node: timeout waiting for CR, forcing restart..."
+                fi
                 ${CONTAINER_TOOL} restart "$node"
                 echo "[reboot-watcher] $node: container restarted, waiting for kubelet..."
             ) &
