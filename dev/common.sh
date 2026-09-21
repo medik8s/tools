@@ -29,3 +29,15 @@ detect_container_tool() {
 
 KUBECTL="${KUBECTL:-$(detect_kubectl)}"
 CONTAINER_TOOL="${CONTAINER_TOOL:-$(detect_container_tool)}"
+
+kind_sudo() {
+    if [[ $(id -u) == 0 ]]; then
+        "$@"
+    elif [[ "${CI:-false}" == "true" || ! -t 0 ]]; then
+        # CI or non-interactive environment: fail fast if password is required
+        sudo -n "$@"
+    else
+        # Local interactive environment: allow password prompts
+        sudo "$@"
+    fi
+}

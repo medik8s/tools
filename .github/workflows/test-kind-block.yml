@@ -1,0 +1,108 @@
+name: Shared Block Storage CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-block-e2e:
+    name: Kind Shared Block Storage E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Shared dev environment
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: block-ci
+      CONTAINER_TOOL: docker
+
+      # Block storage state & isolated KUBECONFIG path
+      KIND_BLOCK_STORAGE: "true"
+      KIND_BLOCK_STATE_DIR: ${{ github.workspace }}/.state/kind-block
+      KUBECONFIG: ${{ github.workspace }}/.state/kind-block/kubeconfig
+
+      SETUP_NULL_DEVICE_WATCHDOG: "true"
+      SKIP_REGISTRY: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install operator-sdk
+        run: |
+          make operator-sdk
+          sudo cp ./bin/operator-sdk /usr/local/bin/
+
+      - name: Run Hermetic Unit Tests
+        run: python3 -m unittest discover -s dev/tests -v
+
+      - name: Create Kind cluster with Shared Block Storage
+        run: |
+          make dev-setup
+          # Fail-safe: export kubeconfig to declared workflow path for subsequent steps
+          mkdir -p "$(dirname "${KUBECONFIG}")"
+          kind get kubeconfig --name "${MEDIK8S_CLUSTER_NAME}" > "${KUBECONFIG}"
+
+      - name: Pre-test cluster snapshot
+        run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
+
+      - name: Verify Shared Block Storage Read/Write Across Worker Nodes
+        run: |
+          echo "=== Locating Shared Block Device ==="
+          # Extract the exact loop device path mapped by kind-block.sh (e.g., /dev/loop0)
+          BLOCK_DEV=$(grep -o '/dev/loop[0-9]*' "${KIND_BLOCK_STATE_DIR}/kind.yaml" | head -n1)
+
+          if [ -z "${BLOCK_DEV}" ]; then
+            echo "❌ ERROR: Could not find loop device path in ${KIND_BLOCK_STATE_DIR}/kind.yaml"
+            cat "${KIND_BLOCK_STATE_DIR}/kind.yaml"
+            exit 1
+          fi
+
+          echo "Detected shared block device: ${BLOCK_DEV}"
+
+          echo "=== Verifying Device Existence on Worker Nodes ==="
+          ${CONTAINER_TOOL} exec ${MEDIK8S_CLUSTER_NAME}-worker test -b "${BLOCK_DEV}"
+          ${CONTAINER_TOOL} exec ${MEDIK8S_CLUSTER_NAME}-worker2 test -b "${BLOCK_DEV}"
+
+          echo "=== Verifying Shared Raw Block Data I/O Across Workers ==="
+          TEST_TOKEN="MEDIK8S_BLOCK_CI_$(date +%s)"
+
+          # 1. Write payload token to the start of the raw block device from Worker 1
+          echo "Writing token '$TEST_TOKEN' to ${BLOCK_DEV} on ${MEDIK8S_CLUSTER_NAME}-worker..."
+          ${CONTAINER_TOOL} exec ${MEDIK8S_CLUSTER_NAME}-worker sh -c "printf '%s' '$TEST_TOKEN' | dd of=${BLOCK_DEV} bs=512 count=1 conv=notrunc status=none"
+          ${CONTAINER_TOOL} exec ${MEDIK8S_CLUSTER_NAME}-worker sync
+
+          # 2. Read exact byte count back from the raw block device on Worker 2
+          echo "Reading token from ${BLOCK_DEV} on ${MEDIK8S_CLUSTER_NAME}-worker2..."
+          READ_OUTPUT=$(${CONTAINER_TOOL} exec ${MEDIK8S_CLUSTER_NAME}-worker2 dd if=${BLOCK_DEV} bs=1 count=${#TEST_TOKEN} status=none)
+
+          echo "Wrote: '$TEST_TOKEN'"
+          echo "Read:  '$READ_OUTPUT'"
+
+          if [ "$TEST_TOKEN" = "$READ_OUTPUT" ]; then
+            echo "✅ SUCCESS: Shared raw block storage verified across worker nodes!"
+          else
+            echo "❌ ERROR: Block storage data mismatch across worker nodes!"
+            exit 1
+          fi
+
+      - name: Debug on failure
+        if: ${{ failure() }}
+        run: make dev-ci-debug
+
+      - name: Teardown Kind cluster
+        if: ${{ always() }}
+        run: make dev-teardown

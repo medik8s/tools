@@ -22,6 +22,7 @@ SKIP_REGISTRY="${SKIP_REGISTRY:-false}"
 REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
 REG_PORT="${MEDIK8S_REGISTRY_PORT:-5000}"
 KIND_HA="${KIND_HA:-false}"
+KIND_BLOCK_STORAGE="${KIND_BLOCK_STORAGE:-false}"
 KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
 
 # Parse arguments
@@ -79,6 +80,8 @@ while [[ $# -gt 0 ]]; do
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
+            echo "  KIND_BLOCK_STORAGE        Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
+            echo "  KIND_BLOCK_STATE_DIR      Absolute directory for block state and isolated kubeconfig"
             exit 0
             ;;
         *)
@@ -90,6 +93,16 @@ done
 
 if [ "${KIND_HA}" = true ]; then
     KIND_CONFIG="${SCRIPT_DIR}/kind-config-ha.yaml"
+fi
+
+if [ "${KIND_BLOCK_STORAGE}" = true ]; then
+    if [ "${SKIP_KIND}" = true ]; then
+        echo "KIND_BLOCK_STORAGE requires creating a Kind cluster; --skip-kind is unsupported." >&2
+        exit 1
+    fi
+    source "${SCRIPT_DIR}/kind-block.sh"
+    kind_block_state
+    kind_block_check_host
 fi
 
 # Check prerequisites
@@ -271,7 +284,7 @@ json.dump(d,sys.stdout,indent=2)
                     echo "A simple 'systemctl --user restart' is NOT sufficient — the user@.service"
                     echo "unit must be fully restarted, which only happens at login."
                     echo ""
-                    echo "Alternatively, create the cluster with sudo:"
+                    echo "Alternatively, create the cluster with :"
                     echo "  sudo KIND_EXPERIMENTAL_PROVIDER=podman kind create cluster \\"
                     echo "    --config ${KIND_CONFIG} --name ${CLUSTER_NAME}"
                     echo "  sudo kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config"
@@ -282,8 +295,15 @@ json.dump(d,sys.stdout,indent=2)
         fi
 
         echo "=== Creating Kind cluster '${CLUSTER_NAME}' ==="
+        if [ "${KIND_BLOCK_STORAGE}" = true ]; then
+            kind_block_prepare
+        fi
         kind create cluster --config "${KIND_CONFIG}" --name "${CLUSTER_NAME}"
     else
+        if [ "${KIND_BLOCK_STORAGE}" = true ]; then
+            echo "Refusing to retrofit block storage onto an existing cluster. Run dev-teardown first." >&2
+            exit 1
+        fi
         echo "=== Cluster '${CLUSTER_NAME}' already exists — skipping creation, re-applying configuration ==="
     fi
 
