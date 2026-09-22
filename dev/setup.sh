@@ -73,7 +73,9 @@ while [[ $# -gt 0 ]]; do
             echo "  MEDIK8S_REGISTRY_PORT     Local registry port (default: 5000)"
             echo "  MEDIK8S_CLUSTER_NAME      Kind cluster name (default: medik8s-dev)"
             echo "  MEDIK8S_NAMESPACE         Shared dev namespace (default: medik8s-system)"
-            echo "  CERT_MANAGER_VERSION      Cert-manager version (default: v1.17.2)"
+            echo "  CERT_MANAGER_VERSION           Cert-manager version (default: v1.17.2)
+  SETUP_NULL_DEVICE_WATCHDOG     Set to 'true' to create a per-node null /dev/watchdog (SBR multi-node e2e)
+  SETUP_NFS_RWX                  Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)"
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
@@ -349,6 +351,14 @@ EOF"
         echo "  All worker nodes already labeled."
     fi
 
+    # Optional: per-node null-backed /dev/watchdog for SBR multi-node e2e in Kind.
+    # The real softdog device is single-open; SBR needs every node's agent to hold
+    # its own watchdog concurrently. Set SETUP_NULL_DEVICE_WATCHDOG=true to enable.
+    if [ "${SETUP_NULL_DEVICE_WATCHDOG:-false}" = "true" ]; then
+        echo "=== Setting up per-node null-device /dev/watchdog (SETUP_NULL_DEVICE_WATCHDOG=true) ==="
+        "${SCRIPT_DIR}/setup-null-device-watchdog.sh"
+    fi
+
     echo "=== Loading softdog kernel module on worker nodes (for SNR/SBR watchdog) ==="
     echo "  Using soft_noboot=1 so the watchdog fires harmlessly (no real reboot)."
     echo "  The reboot watcher (make dev-reboot-watcher) handles Kind container restarts."
@@ -363,6 +373,13 @@ EOF"
                 echo "  Warning: could not load softdog on $node (SNR/SBR watchdog reboot testing will be limited)"
         fi
     done
+
+    # Optional: RWX NFS filesystem StorageClass for SBR filesystem-mode e2e in Kind.
+    # Requires the nfsd kernel module on the host. Set SETUP_NFS_RWX=true to enable.
+    if [ "${SETUP_NFS_RWX:-false}" = "true" ]; then
+        echo "=== Setting up RWX NFS filesystem StorageClass (SETUP_NFS_RWX=true) ==="
+        "${SCRIPT_DIR}/setup-nfs-rwx.sh"
+    fi
 fi
 
 echo "=== Ensuring namespace '${DEV_NS}' ==="
