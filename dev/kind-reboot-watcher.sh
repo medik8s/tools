@@ -97,18 +97,11 @@ get_worker_nodes() {
         kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null | grep worker || true
 }
 
-# Check if kubelet is running on a node container
-is_kubelet_running() {
-    local node="$1"
-    ${CONTAINER_TOOL} exec "$node" systemctl is-active kubelet &>/dev/null
-}
-
-# Check if node is NotReady via kubectl
-is_node_not_ready() {
+is_node_ready() {
     local node="$1"
     local status
     status=$(${KUBECTL} get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
-    [[ "$status" != "True" ]]
+    [[ "$status" == "True" ]]
 }
 
 # --- SNR mode ---
@@ -189,17 +182,23 @@ while true; do
     for node in $WORKERS; do
         # Skip nodes already being rebooted
         if echo " $REBOOTING " | grep -qF " $node "; then
-            # Check if reboot completed (kubelet running again)
-            if is_kubelet_running "$node"; then
-                log "$node: kubelet is back, reboot complete."
+            # Check if reboot completed (node Ready again)
+            if is_node_ready "$node"; then
+                log "$node: node is Ready again, reboot complete."
                 REBOOTING=$(echo "$REBOOTING" | tr ' ' '\n' | grep -vxF "$node" | tr '\n' ' ')
             fi
             continue
         fi
 
-        # Detect stopped kubelet (node becoming NotReady)
-        if is_node_not_ready "$node" && ! is_kubelet_running "$node"; then
-            log "$node: kubelet stopped, NotReady detected."
+        # Detect node becoming NotReady (covers stopped kubelet and network partition).
+        # Sleep briefly to let transient NotReady states (cert rotation, resource pressure)
+        # recover on their own before committing to a restart.
+        if ! is_node_ready "$node"; then
+            sleep 10
+            if is_node_ready "$node"; then
+                continue
+            fi
+            log "$node: NotReady detected."
             REBOOTING="$REBOOTING $node"
 
             if [ "$MODE" = "snr" ]; then
