@@ -284,7 +284,13 @@ else
 endif
 
 # Source-to-OLM images for CI and external-cluster upgrade testing.
-# Product-specific bundle generation remains in each operator Makefile.
+#
+# Most callers only need to set VERSION, PREVIOUS_VERSION, and DEV_IMG. The
+# DEV_OLM_* variables below are override points for differences between the
+# operator repositories; product-specific bundle generation stays in each
+# operator Makefile.
+
+# Bundle identity and OLM installation settings.
 DEV_OLM_VERSION ?= $(if $(VERSION),$(VERSION),$(DEFAULT_VERSION))
 DEV_OLM_PACKAGE_NAME ?= $(OPERATOR_NAME)
 DEV_OLM_OPERATOR_NAMESPACE ?= $(if $(OPERATOR_NAMESPACE),$(OPERATOR_NAMESPACE),openshift-workload-availability)
@@ -293,16 +299,27 @@ DEV_OLM_CHANNELS ?= $(if $(CHANNELS),$(CHANNELS),$(DEV_OLM_CHANNEL))
 DEV_OLM_INSTALL_MODE ?= AllNamespaces
 DEV_OLM_SECURITY_CONTEXT_CONFIG ?= restricted
 
+# Image names derived from DEV_IMG.
+#
 # Preserve the registry port while moving the suffix before the image tag.
 # Example: ttl.sh/operator-run:2h -> ttl.sh/operator-run-bundle:2h.
 DEV_OLM_IMAGE_REPOSITORY := $(shell printf '%s' '$(DEV_IMG)' | sed 's/:[^:]*$$//')
 DEV_OLM_IMAGE_TAG := $(shell printf '%s' '$(DEV_IMG)' | sed 's/^.*://')
 DEV_OLM_BUNDLE_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-bundle:$(DEV_OLM_IMAGE_TAG)
 DEV_OLM_CATALOG_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-catalog:$(DEV_OLM_IMAGE_TAG)
+
+# Operator-specific build hooks.
+#
+# SBR is detected through cmd/*agent*/Dockerfile and gets a separate operand
+# image. NHC is detected through config/manifests/ocp and uses its OCP bundle
+# target. Other repositories use their normal bundle-build target.
 DEV_OLM_AGENT_DOCKERFILE ?= $(firstword $(wildcard cmd/*agent*/Dockerfile))
 DEV_OLM_AGENT_IMAGE ?= $(if $(DEV_OLM_AGENT_DOCKERFILE),$(DEV_OLM_IMAGE_REPOSITORY)-agent:$(DEV_OLM_IMAGE_TAG),)
 DEV_OLM_BUNDLE_BUILD_TARGET ?= $(if $(wildcard config/manifests/ocp),bundle-build-ocp,bundle-build)
 DEV_OLM_EXTRA_BUILD_TARGETS ?=
+
+# FBC workspace and optional upgrade source.
+# PREVIOUS_VERSION selects the released bundle that the candidate replaces.
 DEV_OLM_CATALOG_DIR ?= .dev-catalog
 DEV_OLM_CATALOG_DOCKERFILE ?= $(DEV_OLM_CATALOG_DIR).Dockerfile
 DEV_OLM_RELEASED_BUNDLE_NAME = $(if $(filter %-operator,$(OPERATOR_NAME)),$(OPERATOR_NAME)-bundle,$(OPERATOR_NAME)-operator-bundle)
@@ -369,14 +386,21 @@ else
 	fi
 	@if [ -n "$(DEV_OLM_EXTRA_BUILD_TARGETS)" ]; then \
 		$(MAKE) $(DEV_OLM_EXTRA_BUILD_TARGETS) \
-			VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
+			VERSION="$(DEV_OLM_VERSION)" \
+			IMG="$(DEV_IMG)" \
+			AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
 			BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)"; \
 	fi
+	# Forward conventional image and bundle variables to the operator-owned
+	# bundle target. This keeps repository-specific manifest generation there.
 	@echo "=== Generating bundle with $(DEV_OLM_BUNDLE_BUILD_TARGET) ==="
 	$(MAKE) $(DEV_OLM_BUNDLE_BUILD_TARGET) \
-		VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
+		VERSION="$(DEV_OLM_VERSION)" \
+		IMG="$(DEV_IMG)" \
+		AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
 		BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)" \
-		CHANNELS="$(DEV_OLM_CHANNELS)" DEFAULT_CHANNEL="$(DEV_OLM_CHANNEL)" \
+		CHANNELS="$(DEV_OLM_CHANNELS)" \
+		DEFAULT_CHANNEL="$(DEV_OLM_CHANNEL)" \
 		PREVIOUS_VERSION="$(PREVIOUS_VERSION)"
 	"$(DEV_OLM_OPERATOR_SDK)" bundle validate ./bundle --select-optional suite=operatorframework
 	$(CONTAINER_TOOL) push "$(DEV_OLM_BUNDLE_IMAGE)"
@@ -387,7 +411,10 @@ dev-olm-catalog-build: dev-olm-build-push dev-olm-opm ## Build an FBC image conn
 	@rm -rf "$(DEV_OLM_CATALOG_DIR)" "$(DEV_OLM_CATALOG_DOCKERFILE)"
 	@mkdir -p "$(DEV_OLM_CATALOG_DIR)"
 	"$(DEV_OLM_OPM)" generate dockerfile "$(DEV_OLM_CATALOG_DIR)"
-	"$(DEV_OLM_OPM)" init "$(DEV_OLM_PACKAGE_NAME)" --default-channel="$(DEV_OLM_CHANNEL)" --description=./README.md --output yaml > "$(DEV_OLM_CATALOG_DIR)/index.yaml"
+	"$(DEV_OLM_OPM)" init "$(DEV_OLM_PACKAGE_NAME)" \
+		--default-channel="$(DEV_OLM_CHANNEL)" \
+		--description=./README.md \
+		--output yaml > "$(DEV_OLM_CATALOG_DIR)/index.yaml"
 	@candidate="$$($(DEV_OLM_OPM) render "$(DEV_OLM_BUNDLE_IMAGE)" --output yaml)"; \
 		printf '%s\n' "$$candidate" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
 		candidate_name="$$(printf '%s\n' "$$candidate" | awk '/^schema: olm.bundle$$|^image: /{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
@@ -407,7 +434,9 @@ dev-olm-catalog-build: dev-olm-build-push dev-olm-opm ## Build an FBC image conn
 			fi; \
 		done
 	"$(DEV_OLM_OPM)" validate "$(DEV_OLM_CATALOG_DIR)"
-	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f "$(DEV_OLM_CATALOG_DOCKERFILE)" -t $(DEV_OLM_CATALOG_IMAGE) .
+	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) \
+		-f "$(DEV_OLM_CATALOG_DOCKERFILE)" \
+		-t "$(DEV_OLM_CATALOG_IMAGE)" .
 	@rm -rf "$(DEV_OLM_CATALOG_DIR)" "$(DEV_OLM_CATALOG_DOCKERFILE)"
 
 .PHONY: dev-olm-catalog-push
