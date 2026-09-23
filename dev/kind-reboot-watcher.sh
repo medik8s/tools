@@ -113,21 +113,25 @@ is_node_not_ready() {
 
 # --- SNR mode ---
 
-# Check if a SelfNodeRemediation CR exists for a given node.
-has_remediation_cr() {
+# Return the UID of the current SelfNodeRemediation CR for a node, or empty string.
+get_snr_cr_uid() {
     local node="$1"
     ${KUBECTL} get selfnoderemediation -A --field-selector="metadata.name=${node}" \
-        --no-headers 2>/dev/null | grep -q .
+        -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null || true
 }
 
-# Wait for a SelfNodeRemediation CR to appear for the node, or until timeout.
+# Wait for a NEW SelfNodeRemediation CR (different UID from baseline) to appear.
+# Returns 0 when a new CR is found, 1 on timeout.
 wait_for_remediation_cr() {
     local node="$1"
     local timeout="$2"
+    local baseline_uid="$3"
     local elapsed=0
 
     while [ "$elapsed" -lt "$timeout" ]; do
-        if has_remediation_cr "$node"; then
+        local uid
+        uid=$(get_snr_cr_uid "$node")
+        if [ -n "$uid" ] && [ "$uid" != "$baseline_uid" ]; then
             return 0
         fi
         sleep "$CR_POLL_INTERVAL"
@@ -138,24 +142,29 @@ wait_for_remediation_cr() {
 
 # --- SBR mode ---
 
-# Check if StorageBasedRemediation FencingSucceeded=True for a node.
-fencing_succeeded() {
-    local node="$1" out
-    out=$(${KUBECTL} get storagebasedremediation -A \
+# Return "UID:status" for the current StorageBasedRemediation CR, or empty.
+get_sbr_cr_fencing_state() {
+    local node="$1"
+    ${KUBECTL} get storagebasedremediation -A \
         --field-selector="metadata.name=${node}" \
-        -o jsonpath='{range .items[*].status.conditions[?(@.type=="FencingSucceeded")]}{.status}{end}' \
-        2>/dev/null)
-    [[ "$out" == *"True"* ]]
+        -o jsonpath='{.items[0].metadata.uid}:{range .items[0].status.conditions[?(@.type=="FencingSucceeded")]}{.status}{end}' \
+        2>/dev/null || true
 }
 
-# Wait until FencingSucceeded=True for the node, or until timeout.
+# Wait until a NEW StorageBasedRemediation CR (different UID from baseline) reaches
+# FencingSucceeded=True, or until timeout.
 wait_for_fencing() {
     local node="$1"
     local timeout="$2"
+    local baseline_uid="$3"
     local elapsed=0
 
     while [ "$elapsed" -lt "$timeout" ]; do
-        if fencing_succeeded "$node"; then
+        local state uid fencing_status
+        state=$(get_sbr_cr_fencing_state "$node")
+        uid="${state%%:*}"
+        fencing_status="${state#*:}"
+        if [ -n "$uid" ] && [ "$uid" != "$baseline_uid" ] && [ "$fencing_status" = "True" ]; then
             return 0
         fi
         sleep "$CR_POLL_INTERVAL"
@@ -183,7 +192,7 @@ while true; do
             # Check if reboot completed (kubelet running again)
             if is_kubelet_running "$node"; then
                 log "$node: kubelet is back, reboot complete."
-                REBOOTING=$(echo "$REBOOTING" | tr ' ' '\n' | grep -vF "$node" | tr '\n' ' ')
+                REBOOTING=$(echo "$REBOOTING" | tr ' ' '\n' | grep -vxF "$node" | tr '\n' ' ')
             fi
             continue
         fi
@@ -194,10 +203,12 @@ while true; do
             REBOOTING="$REBOOTING $node"
 
             if [ "$MODE" = "snr" ]; then
-                log "$node: waiting for SelfNodeRemediation CR (timeout: ${REBOOT_DELAY}s)..."
+                # Capture baseline UID so we wait for a freshly-created CR, not a stale one.
+                local_baseline_uid=$(get_snr_cr_uid "$node")
+                log "$node: waiting for new SelfNodeRemediation CR (baseline UID: ${local_baseline_uid:-none}, timeout: ${REBOOT_DELAY}s)..."
                 (
-                    if wait_for_remediation_cr "$node" "$REBOOT_DELAY"; then
-                        log "$node: SelfNodeRemediation CR found, restarting container..."
+                    if wait_for_remediation_cr "$node" "$REBOOT_DELAY" "$local_baseline_uid"; then
+                        log "$node: new SelfNodeRemediation CR found, restarting container..."
                     else
                         log "$node: timeout waiting for CR, forcing restart..."
                     fi
@@ -205,9 +216,12 @@ while true; do
                     log "$node: container restarted, waiting for kubelet..."
                 ) &
             else
-                log "$node: waiting for FencingSucceeded=True (timeout: ${REBOOT_DELAY}s)..."
+                # Capture baseline UID so a stale FencingSucceeded from a prior remediation
+                # does not prematurely trigger a restart for the current one.
+                local_baseline_uid=$(get_sbr_cr_fencing_state "$node"); local_baseline_uid="${local_baseline_uid%%:*}"
+                log "$node: waiting for FencingSucceeded=True on new CR (baseline UID: ${local_baseline_uid:-none}, timeout: ${REBOOT_DELAY}s)..."
                 (
-                    if wait_for_fencing "$node" "$REBOOT_DELAY"; then
+                    if wait_for_fencing "$node" "$REBOOT_DELAY" "$local_baseline_uid"; then
                         log "$node: FencingSucceeded=True, restarting container to complete reboot..."
                     else
                         log "$node: timeout waiting for FencingSucceeded, forcing restart..."

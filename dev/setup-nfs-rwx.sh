@@ -14,7 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
 CSI_DRIVER_NFS_VERSION="${CSI_DRIVER_NFS_VERSION:-v4.11.0}"
 NFS_NAMESPACE="${NFS_NAMESPACE:-nfs-server}"
 STORAGE_CLASS_NAME="${STORAGE_CLASS_NAME:-nfs-csi}"
