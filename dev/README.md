@@ -158,6 +158,21 @@ All `dev-*` targets are now available.
 - **inotify limits** increased automatically when running as root
 - **OLM** (if operator-sdk is available; uses `operator-sdk olm install` which installs OLM v0 — OLM v1 requires separate setup)
 
+### Optional add-ons (via environment variables)
+
+`dev-setup` supports opt-in extensions for operators that need additional cluster infrastructure:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SETUP_NFS_RWX` | `false` | Install `csi-driver-nfs` + in-cluster NFS server and expose a `nfs-csi` RWX StorageClass. Required for SBR filesystem-mode e2e tests. The `nfsd` kernel module must be loaded on the host before `dev-setup` runs (`sudo modprobe nfsd nfs`). |
+| `SETUP_NULL_DEVICE_WATCHDOG` | `false` | Replace each Kind node's `/dev/watchdog` with a per-node null-backed char device (`mknod c 1 3`). Required for SBR multi-node e2e: the real softdog device is single-open, so only one node's agent can hold it at a time; the null device lets every agent hold its own watchdog concurrently. |
+
+Example — SBR e2e setup:
+```bash
+sudo modprobe nfsd nfs   # load kernel NFS server module first
+SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup
+```
+
 Re-running `make dev-setup` on an existing cluster is safe — it re-applies configuration without recreating.
 
 **Note:** Each operator deploys into its own namespace (e.g. `self-node-remediation`, `node-healthcheck-operator-system`) as defined in its kustomization files (either `config/default/kustomization.yaml` or a component/patch kustomization). The `dev-deploy` target automatically creates cert-manager certificates, patches the deployment to mount webhook TLS secrets, and waits for the deployment to become ready. If NHC and a remediator (SNR, FAR, or MDR) are both deployed, it also creates a NodeHealthCheck CR linking them.
@@ -274,7 +289,7 @@ commands to run instead of executing them directly (safety first). Set
 | SNR | ~85% | Peer health, softdog watchdog, API check. No hardware watchdog. |
 | FAR | Controller logic | No real fence agents — controller reconciliation is testable |
 | MDR | Controller logic | No Machine API — reconciliation testable via envtest (`make test`) |
-| SBR | Unit only | No shared storage. Leader election RBAC error on startup (SBR bug). |
+| SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
 
 ## Limitations
 
