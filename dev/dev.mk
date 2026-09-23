@@ -283,6 +283,86 @@ else
 	$(MAKE) bundle bundle-build bundle-push bundle-run IMG=$(DEV_IMG) BUNDLE_IMG=$(DEV_IMG)-bundle
 endif
 
+# Source-to-OLM images for CI and external-cluster upgrade testing.
+# Product-specific bundle generation remains in each operator Makefile.
+DEV_OLM_VERSION ?= $(if $(VERSION),$(VERSION),$(DEFAULT_VERSION))
+DEV_OLM_PACKAGE_NAME ?= $(OPERATOR_NAME)
+DEV_OLM_CHANNEL ?= stable
+DEV_OLM_CHANNELS ?= $(if $(CHANNELS),$(CHANNELS),$(DEV_OLM_CHANNEL))
+# Preserve the registry port while moving the suffix before the image tag.
+# Example: ttl.sh/operator-run:2h -> ttl.sh/operator-run-bundle:2h.
+DEV_OLM_IMAGE_REPOSITORY := $(shell printf '%s' '$(DEV_IMG)' | sed 's/:[^:]*$$//')
+DEV_OLM_IMAGE_TAG := $(shell printf '%s' '$(DEV_IMG)' | sed 's/^.*://')
+DEV_OLM_BUNDLE_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-bundle:$(DEV_OLM_IMAGE_TAG)
+DEV_OLM_CATALOG_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-catalog:$(DEV_OLM_IMAGE_TAG)
+DEV_OLM_BUNDLE_BUILD_TARGET ?= $(if $(wildcard config/manifests/ocp),bundle-build-ocp,bundle-build)
+DEV_OLM_EXTRA_BUILD_TARGETS ?=
+DEV_OLM_CATALOG_DIR ?= .dev-catalog
+DEV_OLM_RELEASED_BUNDLE_NAME = $(if $(filter %-operator,$(OPERATOR_NAME)),$(OPERATOR_NAME)-bundle,$(OPERATOR_NAME)-operator-bundle)
+DEV_OLM_RELEASED_BUNDLE_REPOSITORY ?= registry.redhat.io/workload-availability/$(DEV_OLM_RELEASED_BUNDLE_NAME)
+DEV_OLM_PREVIOUS_BUNDLE_IMAGE ?= $(if $(PREVIOUS_VERSION),$(DEV_OLM_RELEASED_BUNDLE_REPOSITORY):v$(PREVIOUS_VERSION),)
+
+.PHONY: dev-olm-build-push
+dev-olm-build-push: dev-build ## Build and push source and OLM bundle images for external-cluster testing
+ifeq ($(DEV_REGISTRY),local)
+	@echo "Error: dev-olm-build-push requires a registry; use DEV_REGISTRY=ttl.sh for CI." >&2
+	@exit 1
+else
+	@command -v operator-sdk >/dev/null 2>&1 || { echo "Error: operator-sdk is required." >&2; exit 1; }
+	@test -n "$(DEV_OLM_VERSION)" || { echo "Error: VERSION or DEV_OLM_VERSION is required." >&2; exit 1; }
+	@if [ -n "$(DEV_OLM_EXTRA_BUILD_TARGETS)" ]; then \
+		$(MAKE) $(DEV_OLM_EXTRA_BUILD_TARGETS) \
+			VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" DEV_IMG="$(DEV_IMG)" \
+			BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)" DEV_OLM_BUNDLE_IMAGE="$(DEV_OLM_BUNDLE_IMAGE)" \
+			DEV_OLM_CATALOG_IMAGE="$(DEV_OLM_CATALOG_IMAGE)"; \
+	fi
+	@echo "=== Generating bundle with $(DEV_OLM_BUNDLE_BUILD_TARGET) ==="
+	$(MAKE) $(DEV_OLM_BUNDLE_BUILD_TARGET) \
+		VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" \
+		BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)" \
+		CHANNELS="$(DEV_OLM_CHANNELS)" DEFAULT_CHANNEL="$(DEV_OLM_CHANNEL)" \
+		PREVIOUS_VERSION="$(PREVIOUS_VERSION)"
+	operator-sdk bundle validate ./bundle --select-optional suite=operatorframework
+	$(CONTAINER_TOOL) push $(DEV_OLM_BUNDLE_IMAGE)
+endif
+
+.PHONY: dev-olm-catalog-build
+dev-olm-catalog-build: dev-olm-build-push ## Build an FBC image connecting a released bundle to the source bundle
+	@command -v opm >/dev/null 2>&1 || { echo "Error: opm is required." >&2; exit 1; }
+	@rm -rf "$(DEV_OLM_CATALOG_DIR)" catalog.Dockerfile
+	@mkdir -p "$(DEV_OLM_CATALOG_DIR)"
+	opm generate dockerfile "$(DEV_OLM_CATALOG_DIR)"
+	opm init "$(DEV_OLM_PACKAGE_NAME)" --default-channel="$(DEV_OLM_CHANNEL)" --description=./README.md --output yaml > "$(DEV_OLM_CATALOG_DIR)/index.yaml"
+	@candidate="$$(opm render "$(DEV_OLM_BUNDLE_IMAGE)" --output yaml)"; \
+		printf '%s\n' "$$candidate" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
+		candidate_name="$$(printf '%s\n' "$$candidate" | awk '/^schema: olm.bundle/{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
+		test -n "$$candidate_name" || { echo "Error: unable to read candidate bundle name." >&2; exit 1; }; \
+		previous_name=''; \
+		if [ -n "$(DEV_OLM_PREVIOUS_BUNDLE_IMAGE)" ]; then \
+			echo "=== Rendering previous bundle $(DEV_OLM_PREVIOUS_BUNDLE_IMAGE) ==="; \
+			previous="$$(opm render "$(DEV_OLM_PREVIOUS_BUNDLE_IMAGE)" --output yaml)"; \
+			printf '%s\n' "$$previous" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
+			previous_name="$$(printf '%s\n' "$$previous" | awk '/^schema: olm.bundle/{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
+			test -n "$$previous_name" || { echo "Error: unable to read previous bundle name." >&2; exit 1; }; \
+		fi; \
+		for channel in $$(printf '%s' "$(DEV_OLM_CHANNELS)" | tr ',' ' '); do \
+			printf '%s\n' '---' 'schema: olm.channel' "package: $(DEV_OLM_PACKAGE_NAME)" "name: $$channel" 'entries:' "  - name: $$candidate_name" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
+			if [ -n "$$previous_name" ] && [ "$$previous_name" != "$$candidate_name" ]; then \
+				printf '%s\n' "    replaces: $$previous_name" "  - name: $$previous_name" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
+			fi; \
+		done
+	opm validate "$(DEV_OLM_CATALOG_DIR)"
+	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f catalog.Dockerfile -t $(DEV_OLM_CATALOG_IMAGE) .
+	@rm -rf "$(DEV_OLM_CATALOG_DIR)" catalog.Dockerfile
+
+.PHONY: dev-olm-catalog-push
+dev-olm-catalog-push: dev-olm-catalog-build ## Build and push an FBC image for source upgrade testing
+	$(CONTAINER_TOOL) push $(DEV_OLM_CATALOG_IMAGE)
+
+.PHONY: dev-olm-print-released-bundle-repository
+dev-olm-print-released-bundle-repository: ## Print the configured released bundle repository
+	@echo "$(DEV_OLM_RELEASED_BUNDLE_REPOSITORY)"
+
 .PHONY: dev-bundle-cleanup
 dev-bundle-cleanup: ## Remove OLM bundle deployment
 	@if ! command -v operator-sdk >/dev/null 2>&1; then \

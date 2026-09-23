@@ -181,6 +181,22 @@ Re-running `make dev-setup` on an existing cluster is safe — it re-applies con
 
 **Note:** Each operator deploys into its own namespace (e.g. `self-node-remediation`, `node-healthcheck-operator-system`) as defined in its kustomization files (either `config/default/kustomization.yaml` or a component/patch kustomization). The `dev-deploy` target automatically creates cert-manager certificates, patches the deployment to mount webhook TLS secrets, and waits for the deployment to become ready. If NHC and a remediator (SNR, FAR, or MDR) are both deployed, it also creates a NodeHealthCheck CR linking them.
 
+## Source-to-OLM and upgrade catalogs
+
+The same `dev.mk` include can build temporary operator, bundle, and file-based catalog images for CI or an external cluster. Product-specific bundle metadata remains owned by each operator Makefile. If `config/manifests/ocp` exists, `bundle-build-ocp` is used automatically; otherwise the default is `bundle-build`.
+
+```bash
+# Build and push the source operator and bundle to ttl.sh.
+DEV_REGISTRY=ttl.sh make dev-olm-build-push
+
+# Build and push a catalog connecting the latest released bundle to this source.
+DEV_REGISTRY=ttl.sh make dev-olm-catalog-push \
+  PREVIOUS_VERSION=0.12.1 \
+  DEV_OLM_PREVIOUS_BUNDLE_IMAGE=registry.redhat.io/workload-availability/node-healthcheck-operator-bundle:v0.12.1
+```
+
+The catalog target renders both bundle images and uses their actual FBC bundle names to construct the channel. Set `DEV_OLM_EXTRA_BUILD_TARGETS` for operator-owned targets that build additional operands before bundle generation, or override `DEV_OLM_BUNDLE_BUILD_TARGET` when an operator uses a different product bundle target.
+
 ## Failure Simulations
 
 | Command | What it does |
@@ -224,6 +240,9 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 | `dev-undeploy` | Remove operator from cluster |
 | `dev-bundle-run` | Deploy operator via OLM bundle (requires operator-sdk) |
 | `dev-bundle-cleanup` | Remove OLM bundle deployment |
+| `dev-olm-build-push` | Build and push source operator and bundle images |
+| `dev-olm-catalog-build` | Build an FBC image for source upgrade testing |
+| `dev-olm-catalog-push` | Build and push the source upgrade FBC image |
 | `dev-create-nhc` | Create NodeHealthCheck CR (auto-detects SNR/FAR/MDR remediator) |
 | `dev-logs` | Tail operator controller-manager logs |
 | `dev-describe` | Full summary (nodes, pods, CRs, leases, events) |
