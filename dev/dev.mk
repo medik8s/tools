@@ -287,62 +287,117 @@ endif
 # Product-specific bundle generation remains in each operator Makefile.
 DEV_OLM_VERSION ?= $(if $(VERSION),$(VERSION),$(DEFAULT_VERSION))
 DEV_OLM_PACKAGE_NAME ?= $(OPERATOR_NAME)
+DEV_OLM_OPERATOR_NAMESPACE ?= $(if $(OPERATOR_NAMESPACE),$(OPERATOR_NAMESPACE),openshift-workload-availability)
 DEV_OLM_CHANNEL ?= stable
 DEV_OLM_CHANNELS ?= $(if $(CHANNELS),$(CHANNELS),$(DEV_OLM_CHANNEL))
+DEV_OLM_INSTALL_MODE ?= AllNamespaces
+DEV_OLM_SECURITY_CONTEXT_CONFIG ?= restricted
+
 # Preserve the registry port while moving the suffix before the image tag.
 # Example: ttl.sh/operator-run:2h -> ttl.sh/operator-run-bundle:2h.
 DEV_OLM_IMAGE_REPOSITORY := $(shell printf '%s' '$(DEV_IMG)' | sed 's/:[^:]*$$//')
 DEV_OLM_IMAGE_TAG := $(shell printf '%s' '$(DEV_IMG)' | sed 's/^.*://')
 DEV_OLM_BUNDLE_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-bundle:$(DEV_OLM_IMAGE_TAG)
 DEV_OLM_CATALOG_IMAGE ?= $(DEV_OLM_IMAGE_REPOSITORY)-catalog:$(DEV_OLM_IMAGE_TAG)
+DEV_OLM_AGENT_DOCKERFILE ?= $(firstword $(wildcard cmd/*agent*/Dockerfile))
+DEV_OLM_AGENT_IMAGE ?= $(if $(DEV_OLM_AGENT_DOCKERFILE),$(DEV_OLM_IMAGE_REPOSITORY)-agent:$(DEV_OLM_IMAGE_TAG),)
 DEV_OLM_BUNDLE_BUILD_TARGET ?= $(if $(wildcard config/manifests/ocp),bundle-build-ocp,bundle-build)
 DEV_OLM_EXTRA_BUILD_TARGETS ?=
 DEV_OLM_CATALOG_DIR ?= .dev-catalog
+DEV_OLM_CATALOG_DOCKERFILE ?= $(DEV_OLM_CATALOG_DIR).Dockerfile
 DEV_OLM_RELEASED_BUNDLE_NAME = $(if $(filter %-operator,$(OPERATOR_NAME)),$(OPERATOR_NAME)-bundle,$(OPERATOR_NAME)-operator-bundle)
 DEV_OLM_RELEASED_BUNDLE_REPOSITORY ?= registry.redhat.io/workload-availability/$(DEV_OLM_RELEASED_BUNDLE_NAME)
 DEV_OLM_PREVIOUS_BUNDLE_IMAGE ?= $(if $(PREVIOUS_VERSION),$(DEV_OLM_RELEASED_BUNDLE_REPOSITORY):v$(PREVIOUS_VERSION),)
 
+# Pinned tools used directly by the shared targets. Operator Makefiles retain
+# ownership of their controller-gen and kustomize versions.
+DEV_OLM_OPERATOR_SDK_VERSION ?= $(if $(OPERATOR_SDK_VERSION),$(OPERATOR_SDK_VERSION),v1.42.3)
+DEV_OLM_OPM_VERSION ?= v1.42.0
+DEV_OLM_GOOS ?= $(shell go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')
+DEV_OLM_GOARCH ?= $(shell go env GOARCH 2>/dev/null || uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+DEV_OLM_LOCALBIN ?= $(CURDIR)/bin/dev-olm
+DEV_OLM_OPERATOR_SDK ?= $(DEV_OLM_LOCALBIN)/operator-sdk-$(DEV_OLM_OPERATOR_SDK_VERSION)
+DEV_OLM_OPM ?= $(DEV_OLM_LOCALBIN)/opm-$(DEV_OLM_OPM_VERSION)
+
+.PHONY: dev-olm-operator-sdk dev-olm-opm dev-olm-tools
+dev-olm-operator-sdk:
+	@if [ ! -x "$(DEV_OLM_OPERATOR_SDK)" ]; then \
+		command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }; \
+		mkdir -p "$(dir $(DEV_OLM_OPERATOR_SDK))"; \
+		curl --fail --retry 5 -sSLo "$(DEV_OLM_OPERATOR_SDK).tmp" \
+			"https://github.com/operator-framework/operator-sdk/releases/download/$(DEV_OLM_OPERATOR_SDK_VERSION)/operator-sdk_$(DEV_OLM_GOOS)_$(DEV_OLM_GOARCH)"; \
+		chmod +x "$(DEV_OLM_OPERATOR_SDK).tmp"; \
+		mv "$(DEV_OLM_OPERATOR_SDK).tmp" "$(DEV_OLM_OPERATOR_SDK)"; \
+	fi
+
+dev-olm-opm:
+	@if [ ! -x "$(DEV_OLM_OPM)" ]; then \
+		command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }; \
+		mkdir -p "$(dir $(DEV_OLM_OPM))"; \
+		curl --fail --retry 5 -sSLo "$(DEV_OLM_OPM).tmp" \
+			"https://github.com/operator-framework/operator-registry/releases/download/$(DEV_OLM_OPM_VERSION)/$(DEV_OLM_GOOS)-$(DEV_OLM_GOARCH)-opm"; \
+		chmod +x "$(DEV_OLM_OPM).tmp"; \
+		mv "$(DEV_OLM_OPM).tmp" "$(DEV_OLM_OPM)"; \
+	fi
+
+dev-olm-tools: dev-olm-operator-sdk dev-olm-opm
+
+.PHONY: dev-olm-validate-inputs
+dev-olm-validate-inputs:
+	@test -n "$(DEV_OLM_VERSION)" || { echo "Error: VERSION or DEV_OLM_VERSION is required." >&2; exit 1; }
+	@if [ "$(OPERATOR_NAME)" = node-healthcheck-operator ]; then \
+		case '$(origin CONSOLE_PLUGIN_IMAGE)' in 'command line'|'environment'|'environment override') ;; \
+			*) echo "Error: NHC requires an explicit CONSOLE_PLUGIN_IMAGE digest pullspec." >&2; exit 1 ;; esac; \
+		case '$(origin MUST_GATHER_IMAGE)' in 'command line'|'environment'|'environment override') ;; \
+			*) echo "Error: NHC requires an explicit MUST_GATHER_IMAGE digest pullspec." >&2; exit 1 ;; esac; \
+		for image in "$(CONSOLE_PLUGIN_IMAGE)" "$(MUST_GATHER_IMAGE)"; do \
+			printf '%s\n' "$$image" | grep -Eq '@sha256:[0-9a-f]{64}$$' || \
+				{ echo "Error: NHC related images must use digest pullspecs." >&2; exit 1; }; \
+		done; \
+	fi
+
 .PHONY: dev-olm-build-push
-dev-olm-build-push: dev-build ## Build and push source and OLM bundle images for external-cluster testing
+dev-olm-build-push: dev-olm-validate-inputs dev-build dev-olm-operator-sdk ## Build and push source, operand, and OLM bundle images
 ifeq ($(DEV_REGISTRY),local)
 	@echo "Error: dev-olm-build-push requires a registry; use DEV_REGISTRY=ttl.sh for CI." >&2
 	@exit 1
 else
-	@command -v operator-sdk >/dev/null 2>&1 || { echo "Error: operator-sdk is required." >&2; exit 1; }
-	@test -n "$(DEV_OLM_VERSION)" || { echo "Error: VERSION or DEV_OLM_VERSION is required." >&2; exit 1; }
+	@if [ -n "$(DEV_OLM_AGENT_DOCKERFILE)" ]; then \
+		echo "=== Building operand image $(DEV_OLM_AGENT_IMAGE) ==="; \
+		$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f "$(DEV_OLM_AGENT_DOCKERFILE)" -t "$(DEV_OLM_AGENT_IMAGE)" .; \
+		$(CONTAINER_TOOL) push "$(DEV_OLM_AGENT_IMAGE)"; \
+	fi
 	@if [ -n "$(DEV_OLM_EXTRA_BUILD_TARGETS)" ]; then \
 		$(MAKE) $(DEV_OLM_EXTRA_BUILD_TARGETS) \
-			VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" DEV_IMG="$(DEV_IMG)" \
-			BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)" DEV_OLM_BUNDLE_IMAGE="$(DEV_OLM_BUNDLE_IMAGE)" \
-			DEV_OLM_CATALOG_IMAGE="$(DEV_OLM_CATALOG_IMAGE)"; \
+			VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
+			BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)"; \
 	fi
 	@echo "=== Generating bundle with $(DEV_OLM_BUNDLE_BUILD_TARGET) ==="
 	$(MAKE) $(DEV_OLM_BUNDLE_BUILD_TARGET) \
-		VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" \
+		VERSION="$(DEV_OLM_VERSION)" IMG="$(DEV_IMG)" AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
 		BUNDLE_IMG="$(DEV_OLM_BUNDLE_IMAGE)" \
 		CHANNELS="$(DEV_OLM_CHANNELS)" DEFAULT_CHANNEL="$(DEV_OLM_CHANNEL)" \
 		PREVIOUS_VERSION="$(PREVIOUS_VERSION)"
-	operator-sdk bundle validate ./bundle --select-optional suite=operatorframework
-	$(CONTAINER_TOOL) push $(DEV_OLM_BUNDLE_IMAGE)
+	"$(DEV_OLM_OPERATOR_SDK)" bundle validate ./bundle --select-optional suite=operatorframework
+	$(CONTAINER_TOOL) push "$(DEV_OLM_BUNDLE_IMAGE)"
 endif
 
 .PHONY: dev-olm-catalog-build
-dev-olm-catalog-build: dev-olm-build-push ## Build an FBC image connecting a released bundle to the source bundle
-	@command -v opm >/dev/null 2>&1 || { echo "Error: opm is required." >&2; exit 1; }
-	@rm -rf "$(DEV_OLM_CATALOG_DIR)" catalog.Dockerfile
+dev-olm-catalog-build: dev-olm-build-push dev-olm-opm ## Build an FBC image connecting a released bundle to the source bundle
+	@rm -rf "$(DEV_OLM_CATALOG_DIR)" "$(DEV_OLM_CATALOG_DOCKERFILE)"
 	@mkdir -p "$(DEV_OLM_CATALOG_DIR)"
-	opm generate dockerfile "$(DEV_OLM_CATALOG_DIR)"
-	opm init "$(DEV_OLM_PACKAGE_NAME)" --default-channel="$(DEV_OLM_CHANNEL)" --description=./README.md --output yaml > "$(DEV_OLM_CATALOG_DIR)/index.yaml"
-	@candidate="$$(opm render "$(DEV_OLM_BUNDLE_IMAGE)" --output yaml)"; \
+	"$(DEV_OLM_OPM)" generate dockerfile "$(DEV_OLM_CATALOG_DIR)"
+	"$(DEV_OLM_OPM)" init "$(DEV_OLM_PACKAGE_NAME)" --default-channel="$(DEV_OLM_CHANNEL)" --description=./README.md --output yaml > "$(DEV_OLM_CATALOG_DIR)/index.yaml"
+	@candidate="$$($(DEV_OLM_OPM) render "$(DEV_OLM_BUNDLE_IMAGE)" --output yaml)"; \
 		printf '%s\n' "$$candidate" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
-		candidate_name="$$(printf '%s\n' "$$candidate" | awk '/^schema: olm.bundle/{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
+		candidate_name="$$(printf '%s\n' "$$candidate" | awk '/^schema: olm.bundle$$|^image: /{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
 		test -n "$$candidate_name" || { echo "Error: unable to read candidate bundle name." >&2; exit 1; }; \
 		previous_name=''; \
 		if [ -n "$(DEV_OLM_PREVIOUS_BUNDLE_IMAGE)" ]; then \
 			echo "=== Rendering previous bundle $(DEV_OLM_PREVIOUS_BUNDLE_IMAGE) ==="; \
-			previous="$$(opm render "$(DEV_OLM_PREVIOUS_BUNDLE_IMAGE)" --output yaml)"; \
+			previous="$$($(DEV_OLM_OPM) render "$(DEV_OLM_PREVIOUS_BUNDLE_IMAGE)" --output yaml)"; \
 			printf '%s\n' "$$previous" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
-			previous_name="$$(printf '%s\n' "$$previous" | awk '/^schema: olm.bundle/{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
+			previous_name="$$(printf '%s\n' "$$previous" | awk '/^schema: olm.bundle$$|^image: /{bundle=1; next} bundle && /^name: /{print $$2; exit}')"; \
 			test -n "$$previous_name" || { echo "Error: unable to read previous bundle name." >&2; exit 1; }; \
 		fi; \
 		for channel in $$(printf '%s' "$(DEV_OLM_CHANNELS)" | tr ',' ' '); do \
@@ -351,9 +406,9 @@ dev-olm-catalog-build: dev-olm-build-push ## Build an FBC image connecting a rel
 				printf '%s\n' "    replaces: $$previous_name" "  - name: $$previous_name" >> "$(DEV_OLM_CATALOG_DIR)/index.yaml"; \
 			fi; \
 		done
-	opm validate "$(DEV_OLM_CATALOG_DIR)"
-	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f catalog.Dockerfile -t $(DEV_OLM_CATALOG_IMAGE) .
-	@rm -rf "$(DEV_OLM_CATALOG_DIR)" catalog.Dockerfile
+	"$(DEV_OLM_OPM)" validate "$(DEV_OLM_CATALOG_DIR)"
+	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f "$(DEV_OLM_CATALOG_DOCKERFILE)" -t $(DEV_OLM_CATALOG_IMAGE) .
+	@rm -rf "$(DEV_OLM_CATALOG_DIR)" "$(DEV_OLM_CATALOG_DOCKERFILE)"
 
 .PHONY: dev-olm-catalog-push
 dev-olm-catalog-push: dev-olm-catalog-build ## Build and push an FBC image for source upgrade testing
@@ -362,6 +417,31 @@ dev-olm-catalog-push: dev-olm-catalog-build ## Build and push an FBC image for s
 .PHONY: dev-olm-print-released-bundle-repository
 dev-olm-print-released-bundle-repository: ## Print the configured released bundle repository
 	@echo "$(DEV_OLM_RELEASED_BUNDLE_REPOSITORY)"
+
+.PHONY: dev-olm-deploy dev-olm-upgrade dev-olm-undeploy
+dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sdk
+	@$(KUBECTL) get namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1 || \
+		$(KUBECTL) create namespace "$(DEV_OLM_OPERATOR_NAMESPACE)"
+	@if [ "$(OPERATOR_NAME)" = self-node-remediation ]; then \
+		$(KUBECTL) label --overwrite namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" \
+			pod-security.kubernetes.io/enforce=privileged \
+			security.openshift.io/scc.podSecurityLabelSync=false; \
+	fi
+	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" cleanup "$(DEV_OLM_PACKAGE_NAME)" --delete-all >/dev/null 2>&1 || true
+	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle "$(DEV_OLM_BUNDLE_IMAGE)" \
+		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
+
+dev-olm-upgrade: dev-olm-build-push ## Upgrade an existing operator-sdk bundle installation
+	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle-upgrade "$(DEV_OLM_BUNDLE_IMAGE)" \
+		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
+
+dev-olm-undeploy: dev-olm-operator-sdk ## Remove an operator-sdk bundle installation
+	@if ! $(KUBECTL) get namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1; then \
+		echo "Namespace $(DEV_OLM_OPERATOR_NAMESPACE) does not exist; nothing to remove."; \
+	else \
+		"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" cleanup "$(DEV_OLM_PACKAGE_NAME)" --delete-all || \
+			echo "Warning: operator-sdk cleanup reported an error; the development cluster can be discarded." >&2; \
+	fi
 
 .PHONY: dev-bundle-cleanup
 dev-bundle-cleanup: ## Remove OLM bundle deployment
