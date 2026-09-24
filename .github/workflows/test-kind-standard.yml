@@ -1,0 +1,77 @@
+name: Standard Kind CI (podman)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-standard-smoke:
+    name: Kind Standard Setup Smoke Test (Podman)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: standard-ci
+      CONTAINER_TOOL: podman
+      KUBECONFIG: ${{ github.workspace }}/.kube/config
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install operator-sdk
+        run: |
+          make operator-sdk
+          sudo cp ./bin/operator-sdk /usr/local/bin/
+
+      - name: Configure cgroup delegation for Podman
+        run: |
+          sudo mkdir -p /etc/systemd/system/user@.service.d
+          sudo tee /etc/systemd/system/user@.service.d/delegate.conf << "EOF"
+          [Service]
+          Delegate=cpu cpuset io memory pids
+          EOF
+          sudo systemctl daemon-reload
+
+          USER_UID=$(id -u)
+          for ctrl in \
+            /sys/fs/cgroup/cgroup.subtree_control \
+            /sys/fs/cgroup/user.slice/cgroup.subtree_control \
+            /sys/fs/cgroup/user.slice/user-${USER_UID}.slice/cgroup.subtree_control \
+            /sys/fs/cgroup/user.slice/user-${USER_UID}.slice/user@${USER_UID}.service/cgroup.subtree_control
+          do
+            if [ -f "$ctrl" ]; then
+              echo "+cpuset" | sudo tee "$ctrl" >/dev/null || true
+            fi
+          done
+
+      - name: Create standard Kind cluster (Default setup)
+        run: make dev-setup
+
+      - name: Verify cluster readiness & components
+        run: |
+          echo "=== Node Readiness ==="
+          kubectl get nodes -o wide
+
+          echo "=== Verifying cert-manager ==="
+          kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
+
+          echo "=== Verifying OLM ==="
+          kubectl wait --for=condition=Available deployment/olm-operator -n olm --timeout=120s
+
+          echo "✅ Default dev-setup smoke test passed!"
+
+      - name: Debug on failure
+        if: ${{ failure() }}
+        run: make dev-ci-debug
+
+      - name: Teardown Kind cluster
+        if: ${{ always() }}
+        run: make dev-teardown

@@ -1,0 +1,30 @@
+# Test fixture only: every Kind worker sees the SAME host loop device.
+# Local PVs do not provide shared block storage across physical machines.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: medik8s-kind-block
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: medik8s-kind-block
+spec:
+  capacity:
+    storage: 64Mi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: medik8s-kind-block
+  volumeMode: Block
+  hostPath:
+    path: /dev/medik8s-kind-block
+    type: BlockDevice
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: medik8s.io/kind-block
+          operator: In
+          values: ["true"]

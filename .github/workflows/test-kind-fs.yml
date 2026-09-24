@@ -1,0 +1,163 @@
+name: Shared NFS Filesystem Storage CI (docker)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-nfs-e2e:
+    name: Kind Shared NFS E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Shared dev environment
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: nfs-ci
+      CONTAINER_TOOL: docker
+
+      # Explicitly set KUBECONFIG inside workspace to prevent root path fallbacks (/kubeconfig)
+      KUBECONFIG: ${{ github.workspace }}/.kube/config
+
+      # NFS storage & environment configuration
+      SETUP_NFS_RWX: "true"
+      SETUP_NULL_DEVICE_WATCHDOG: "true"
+      SKIP_REGISTRY: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install operator-sdk
+        run: |
+          make operator-sdk
+          sudo cp ./bin/operator-sdk /usr/local/bin/
+
+      - name: Run Hermetic Unit Tests
+        run: python3 -m unittest discover -s dev/tests -v
+
+      - name: Load nfsd kernel module on runner
+        run: sudo modprobe nfsd nfs
+
+      - name: Create Kind cluster with NFS storage
+        run: make dev-setup
+
+      - name: Pre-test cluster snapshot
+        run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
+          echo ""
+          echo "=== StorageClasses and PVs ==="
+          kubectl get sc,pv -o wide
+
+      - name: Deploy NFS Test Pods & Verify Filesystem I/O
+        run: |
+          echo "=== Deploying NFS PVC and Worker Pods ==="
+          # Safely query for the NFS StorageClass, falling back to 'nfs-csi' if needed
+          STORAGE_CLASS=$(kubectl get sc -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep nfs | head -n1)
+          STORAGE_CLASS="${STORAGE_CLASS:-nfs-csi}"
+          echo "Using StorageClass: ${STORAGE_CLASS}"
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: shared-nfs-pvc
+          spec:
+            accessModes:
+              - ReadWriteMany
+            resources:
+              requests:
+                storage: 64Mi
+            storageClassName: ${STORAGE_CLASS}
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: nfs-writer
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: ${MEDIK8S_CLUSTER_NAME}-worker
+            containers:
+            - name: ubuntu
+              image: ubuntu:latest
+              command: ["/bin/sh", "-c", "sleep infinity"]
+              volumeMounts:
+              - mountPath: /mnt/shared
+                name: nfs-vol
+            volumes:
+            - name: nfs-vol
+              persistentVolumeClaim:
+                claimName: shared-nfs-pvc
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: nfs-reader
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: ${MEDIK8S_CLUSTER_NAME}-worker2
+            containers:
+            - name: ubuntu
+              image: ubuntu:latest
+              command: ["/bin/sh", "-c", "sleep infinity"]
+              volumeMounts:
+              - mountPath: /mnt/shared
+                name: nfs-vol
+            volumes:
+            - name: nfs-vol
+              persistentVolumeClaim:
+                claimName: shared-nfs-pvc
+          EOF
+
+          echo "=== Waiting for Pods to be Ready ==="
+          kubectl wait --for=condition=Ready pod/nfs-writer pod/nfs-reader --timeout=120s
+
+          echo "=== Verifying Shared NFS Filesystem Read/Write Across Worker Nodes ==="
+          TEST_TOKEN="MEDIK8S_NFS_CI_$(date +%s)"
+
+          # Write payload file from Worker 1
+          kubectl exec nfs-writer -- sh -c "echo '$TEST_TOKEN' > /mnt/shared/testfile.txt"
+
+          # Read payload back from Worker 2
+          READ_OUTPUT=$(kubectl exec nfs-reader -- cat /mnt/shared/testfile.txt | tr -d ' \r\n')
+
+          echo "Wrote: '$TEST_TOKEN'"
+          echo "Read:  '$READ_OUTPUT'"
+
+          if [ "$TEST_TOKEN" = "$READ_OUTPUT" ]; then
+            echo "✅ SUCCESS: Shared NFS filesystem verified across worker nodes!"
+          else
+            echo "❌ ERROR: File data mismatch across worker nodes!"
+            exit 1
+          fi
+
+      - name: Debug on failure
+        if: ${{ failure() }}
+        run: |
+          echo "=== NFS PV & PVC Details ==="
+          kubectl get pv,pvc -o yaml 2>/dev/null || true
+          echo ""
+          echo "=== Pod Details ==="
+          kubectl describe pod nfs-writer nfs-reader 2>/dev/null || true
+          echo ""
+          make dev-ci-debug
+
+      - name: Teardown Kind cluster
+        if: ${{ always() }}
+        run: |
+          # Cleanly delete test workloads while API & NFS servers are active
+          kubectl delete pod nfs-writer nfs-reader --timeout=15s 2>/dev/null || true
+          kubectl delete pvc shared-nfs-pvc --timeout=15s 2>/dev/null || true
+          make dev-teardown

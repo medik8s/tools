@@ -96,6 +96,8 @@ endif
 
 export MEDIK8S_CLUSTER_NAME
 export MEDIK8S_NAMESPACE
+export KIND_BLOCK_STORAGE
+export KIND_BLOCK_STATE_DIR
 
 # Helper to find the namespace for this operator's deployment.
 # First tries the kustomization namespace (works even when OPERATOR_NAME != namespace prefix,
@@ -546,6 +548,8 @@ dev-help: ## Show dev environment help
 	@echo "  DEV_REGISTRY=local          Load directly into Kind nodes (no OLM bundle support)"
 	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
 	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
+	@echo "  KIND_BLOCK_STORAGE=true     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
+	@echo "  KIND_BLOCK_STATE_DIR=/path  Block state and isolated kubeconfig (use same path for teardown)"
 	@echo "  SKIP_REGISTRY=true          Skip local registry creation in dev-setup"
 	@echo "  KIND_HA=true                HA config (3 CP + 3 workers)"
 	@echo "  MEDIK8S_CLUSTER_NAME=name   Kind cluster name (default: medik8s-dev)"

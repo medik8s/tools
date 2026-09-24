@@ -4,6 +4,10 @@ A shared, consistent development environment for all medik8s operators.
 
 ## Quick Start
 
+For a lightweight shared raw block device on Kind, see
+[Kind block storage](kind-block.md). It is opt-in and does not change the default
+cluster setup.
+
 ```bash
 # One-time: add the dev environment snippet to your operator's Makefile
 # (see Setup section below for options)

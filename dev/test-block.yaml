@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-block-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 64Mi
+  storageClassName: medik8s-kind-block
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: block-writer
+  labels:
+    app: block-test
+spec:
+  nodeSelector:
+    medik8s.io/kind-block: "true"
+  containers:
+  - name: ubuntu
+    image: ubuntu:latest
+    command: ["/bin/sh", "-c", "sleep infinity"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - mountPath: /dev/testblock
+      name: block-vol
+  volumes:
+  - name: block-vol
+    persistentVolumeClaim:
+      claimName: shared-block-pvc
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: block-reader
+  labels:
+    app: block-test
+spec:
+  nodeSelector:
+    medik8s.io/kind-block: "true"
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values: ["block-test"]
+        topologyKey: "kubernetes.io/hostname"
+  containers:
+  - name: ubuntu
+    image: ubuntu:latest
+    command: ["/bin/sh", "-c", "sleep infinity"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - mountPath: /dev/testblock
+      name: block-vol
+  volumes:
+  - name: block-vol
+    persistentVolumeClaim:
+      claimName: shared-block-pvc
