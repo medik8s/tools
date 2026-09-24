@@ -330,29 +330,53 @@ DEV_OLM_PREVIOUS_BUNDLE_IMAGE ?= $(if $(PREVIOUS_VERSION),$(DEV_OLM_RELEASED_BUN
 # ownership of their controller-gen and kustomize versions.
 DEV_OLM_OPERATOR_SDK_VERSION ?= $(if $(OPERATOR_SDK_VERSION),$(OPERATOR_SDK_VERSION),v1.42.3)
 DEV_OLM_OPM_VERSION ?= v1.42.0
+DEV_OLM_CURL ?= curl
 DEV_OLM_GOOS ?= $(shell go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')
 DEV_OLM_GOARCH ?= $(shell go env GOARCH 2>/dev/null || uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 DEV_OLM_LOCALBIN ?= $(CURDIR)/bin/dev-olm
 DEV_OLM_OPERATOR_SDK ?= $(DEV_OLM_LOCALBIN)/operator-sdk-$(DEV_OLM_OPERATOR_SDK_VERSION)
 DEV_OLM_OPM ?= $(DEV_OLM_LOCALBIN)/opm-$(DEV_OLM_OPM_VERSION)
+DEV_OLM_OPERATOR_SDK_ASSET = operator-sdk_$(DEV_OLM_GOOS)_$(DEV_OLM_GOARCH)
+DEV_OLM_OPM_ASSET = $(DEV_OLM_GOOS)-$(DEV_OLM_GOARCH)-opm
+DEV_OLM_OPERATOR_SDK_RELEASE_URL = https://github.com/operator-framework/operator-sdk/releases/download/$(DEV_OLM_OPERATOR_SDK_VERSION)
+DEV_OLM_OPM_RELEASE_URL = https://github.com/operator-framework/operator-registry/releases/download/$(DEV_OLM_OPM_VERSION)
+
+# Verify downloads against the checksums published with each upstream release.
+# sha256sum is normally available on Linux; shasum is the macOS fallback.
+define DEV_OLM_VERIFY_SHA256
+expected_checksum="$$($(DEV_OLM_CURL) --fail --retry 5 -sSL "$(3)/checksums.txt" | \
+	awk -v asset="$(2)" '$$2 == asset { print $$1; exit }')"; \
+test -n "$$expected_checksum" || { echo "Error: checksum not found for $(2)." >&2; exit 1; }; \
+if command -v sha256sum >/dev/null 2>&1; then \
+	actual_checksum="$$(sha256sum "$(1)" | awk '{ print $$1 }')"; \
+elif command -v shasum >/dev/null 2>&1; then \
+	actual_checksum="$$(shasum -a 256 "$(1)" | awk '{ print $$1 }')"; \
+else \
+	echo "Error: sha256sum or shasum is required." >&2; exit 1; \
+fi; \
+test "$$actual_checksum" = "$$expected_checksum" || \
+	{ echo "Error: checksum verification failed for $(2)." >&2; exit 1; }
+endef
 
 .PHONY: dev-olm-operator-sdk dev-olm-opm dev-olm-tools
 dev-olm-operator-sdk:
 	@if [ ! -x "$(DEV_OLM_OPERATOR_SDK)" ]; then \
-		command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }; \
+		command -v $(DEV_OLM_CURL) >/dev/null 2>&1 || { echo "Error: $(DEV_OLM_CURL) is required." >&2; exit 1; }; \
 		mkdir -p "$(dir $(DEV_OLM_OPERATOR_SDK))"; \
-		curl --fail --retry 5 -sSLo "$(DEV_OLM_OPERATOR_SDK).tmp" \
-			"https://github.com/operator-framework/operator-sdk/releases/download/$(DEV_OLM_OPERATOR_SDK_VERSION)/operator-sdk_$(DEV_OLM_GOOS)_$(DEV_OLM_GOARCH)"; \
+		$(DEV_OLM_CURL) --fail --retry 5 -sSLo "$(DEV_OLM_OPERATOR_SDK).tmp" \
+			"$(DEV_OLM_OPERATOR_SDK_RELEASE_URL)/$(DEV_OLM_OPERATOR_SDK_ASSET)"; \
+		$(call DEV_OLM_VERIFY_SHA256,$(DEV_OLM_OPERATOR_SDK).tmp,$(DEV_OLM_OPERATOR_SDK_ASSET),$(DEV_OLM_OPERATOR_SDK_RELEASE_URL)); \
 		chmod +x "$(DEV_OLM_OPERATOR_SDK).tmp"; \
 		mv "$(DEV_OLM_OPERATOR_SDK).tmp" "$(DEV_OLM_OPERATOR_SDK)"; \
 	fi
 
 dev-olm-opm:
 	@if [ ! -x "$(DEV_OLM_OPM)" ]; then \
-		command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }; \
+		command -v $(DEV_OLM_CURL) >/dev/null 2>&1 || { echo "Error: $(DEV_OLM_CURL) is required." >&2; exit 1; }; \
 		mkdir -p "$(dir $(DEV_OLM_OPM))"; \
-		curl --fail --retry 5 -sSLo "$(DEV_OLM_OPM).tmp" \
-			"https://github.com/operator-framework/operator-registry/releases/download/$(DEV_OLM_OPM_VERSION)/$(DEV_OLM_GOOS)-$(DEV_OLM_GOARCH)-opm"; \
+		$(DEV_OLM_CURL) --fail --retry 5 -sSLo "$(DEV_OLM_OPM).tmp" \
+			"$(DEV_OLM_OPM_RELEASE_URL)/$(DEV_OLM_OPM_ASSET)"; \
+		$(call DEV_OLM_VERIFY_SHA256,$(DEV_OLM_OPM).tmp,$(DEV_OLM_OPM_ASSET),$(DEV_OLM_OPM_RELEASE_URL)); \
 		chmod +x "$(DEV_OLM_OPM).tmp"; \
 		mv "$(DEV_OLM_OPM).tmp" "$(DEV_OLM_OPM)"; \
 	fi
@@ -386,6 +410,7 @@ else
 	fi
 	@if [ -n "$(DEV_OLM_EXTRA_BUILD_TARGETS)" ]; then \
 		$(MAKE) $(DEV_OLM_EXTRA_BUILD_TARGETS) \
+			CONTAINER_TOOL="$(CONTAINER_TOOL)" \
 			VERSION="$(DEV_OLM_VERSION)" \
 			IMG="$(DEV_IMG)" \
 			AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
@@ -395,6 +420,7 @@ else
 	# bundle target. This keeps repository-specific manifest generation there.
 	@echo "=== Generating bundle with $(DEV_OLM_BUNDLE_BUILD_TARGET) ==="
 	$(MAKE) $(DEV_OLM_BUNDLE_BUILD_TARGET) \
+		CONTAINER_TOOL="$(CONTAINER_TOOL)" \
 		VERSION="$(DEV_OLM_VERSION)" \
 		IMG="$(DEV_IMG)" \
 		AGENT_IMG="$(DEV_OLM_AGENT_IMAGE)" \
