@@ -170,6 +170,7 @@ All `dev-*` targets are now available.
 |----------|---------|-------------|
 | `SETUP_NFS_RWX` | `false` | Install `csi-driver-nfs` + in-cluster NFS server and expose a `nfs-csi` RWX StorageClass. Required for SBR filesystem-mode e2e tests. The `nfsd` kernel module must be loaded on the host before `dev-setup` runs (`sudo modprobe nfsd nfs`). |
 | `SETUP_NULL_DEVICE_WATCHDOG` | `false` | Replace each Kind node's `/dev/watchdog` with a per-node null-backed char device (`mknod c 1 3`). Required for SBR multi-node e2e: the real softdog device is single-open, so only one node's agent can hold it at a time; the null device lets every agent hold its own watchdog concurrently. |
+| `SETUP_DOCKER_SOCKET` | `false` | Bind-mount `/var/run/docker.sock` from the host into the control-plane Kind node at cluster-creation time. Required for FAR fence_docker e2e: the manager pod running on the control-plane node uses the socket to power-cycle worker containers via `fence_docker`. Must be set on the first `dev-setup` run (cluster must be recreated if not set originally). |
 
 Example — SBR e2e setup:
 ```bash
@@ -291,13 +292,13 @@ commands to run instead of executing them directly (safety first). Set
 | NHC | Full | Node conditions, storm recovery, escalation, CP protection |
 | NMO | Full | Cordon, drain, PDB-aware eviction. Pod restarts on startup (missing namespace `list` RBAC — NMO bug, stabilizes after ~4 restarts). |
 | SNR | ~85% | Peer health, softdog watchdog, API check. No hardware watchdog. |
-| FAR | Controller logic | No real fence agents — controller reconciliation is testable |
+| FAR | Real fencing on Kind via `fence_docker` (`SETUP_DOCKER_SOCKET=true`) | `fence_docker` power-cycles worker Kind containers over the host Docker socket. Run with `SETUP_DOCKER_SOCKET=true make dev-setup`. `fence_docker` is present only in the e2e image, not the shipped operator image. |
 | MDR | Controller logic | No Machine API — reconciliation testable via envtest (`make test`) |
 | SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
 
 ## Limitations
 
-- **FAR fence agent execution** — no IPMI/BMC or cloud APIs
+- **FAR fence agent execution** — `fence_docker` works on Kind (power-cycles worker containers); no IPMI/BMC or cloud APIs
 - **MDR Machine API** — Kind has no Machine objects
 - **SBR shared storage** — no ODF
 - **Hardware watchdog** — only softdog (software)
