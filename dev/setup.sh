@@ -400,6 +400,11 @@ EOF"
         echo "=== Setting up RWX NFS filesystem StorageClass (SETUP_NFS_RWX=true) ==="
         "${SCRIPT_DIR}/setup-nfs-rwx.sh"
     fi
+
+    if [ "${KIND_BLOCK_STORAGE}" = true ]; then
+        echo "=== Setting up Kind Block Storage ==="
+        kind_block_install
+    fi
 fi
 
 echo "=== Ensuring namespace '${DEV_NS}' ==="
