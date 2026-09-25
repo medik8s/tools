@@ -18,9 +18,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: medik8s-kind-block
   volumeMode: Block
-  hostPath:
+  local:
     path: /dev/medik8s-kind-block
-    type: BlockDevice
   nodeAffinity:
     required:
       nodeSelectorTerms:
