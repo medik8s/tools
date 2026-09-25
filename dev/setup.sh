@@ -76,7 +76,8 @@ while [[ $# -gt 0 ]]; do
             echo "  MEDIK8S_NAMESPACE         Shared dev namespace (default: medik8s-system)"
             echo "  CERT_MANAGER_VERSION           Cert-manager version (default: v1.17.2)
   SETUP_NULL_DEVICE_WATCHDOG     Set to 'true' to create a per-node null /dev/watchdog (SBR multi-node e2e)
-  SETUP_NFS_RWX                  Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)"
+  SETUP_NFS_RWX                  Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)
+  SETUP_DOCKER_SOCKET            Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
@@ -298,7 +299,32 @@ json.dump(d,sys.stdout,indent=2)
         if [ "${KIND_BLOCK_STORAGE}" = true ]; then
             kind_block_prepare
         fi
-        kind create cluster --config "${KIND_CONFIG}" --name "${CLUSTER_NAME}"
+
+        EFFECTIVE_KIND_CONFIG="${KIND_CONFIG}"
+        if [ "${SETUP_DOCKER_SOCKET:-false}" = "true" ]; then
+            echo "  Adding docker.sock extraMounts to kind config for control-plane node..."
+            EFFECTIVE_KIND_CONFIG=$(mktemp)".yaml"
+            # Host socket path: from CONTAINER_SOCKET_PATH env (supports Podman) or default Docker path.
+            # Always mounted at /var/run/docker.sock inside the node so the Deployment patch is static.
+            HOST_SOCK="${CONTAINER_SOCKET_PATH:-/var/run/docker.sock}"
+            python3 - "${KIND_CONFIG}" "${EFFECTIVE_KIND_CONFIG}" "${HOST_SOCK}" <<'PYEOF'
+import sys, yaml
+src, dst, host_sock = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(src) as f:
+    cfg = yaml.safe_load(f)
+nodes = cfg.setdefault('nodes', [])
+for node in nodes:
+    if node.get('role') == 'control-plane':
+        mounts = node.setdefault('extraMounts', [])
+        sock_mount = {'hostPath': host_sock, 'containerPath': '/var/run/docker.sock'}
+        if sock_mount not in mounts:
+            mounts.append(sock_mount)
+with open(dst, 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False)
+PYEOF
+            trap 'rm -f "${EFFECTIVE_KIND_CONFIG}"' EXIT
+        fi
+        kind create cluster --config "${EFFECTIVE_KIND_CONFIG}" --name "${CLUSTER_NAME}"
     else
         if [ "${KIND_BLOCK_STORAGE}" = true ]; then
             echo "Refusing to retrofit block storage onto an existing cluster. Run dev-teardown first." >&2
@@ -329,6 +355,7 @@ json.dump(d,sys.stdout,indent=2)
         # Get the registry's IP on the kind network for node /etc/hosts entries.
         # Nodes inherit the host's /etc/hosts (which maps kind-registry to 127.0.0.1),
         # but inside the node 127.0.0.1 is the node itself, not the registry.
+        # shellcheck disable=SC2016  # Go template syntax; $net/$conf are not shell variables
         REG_IP=$(${CONTAINER_TOOL} inspect "${REG_NAME}" --format '{{range $net, $conf := .NetworkSettings.Networks}}{{if eq $net "kind"}}{{$conf.IPAddress}}{{end}}{{end}}' 2>/dev/null)
         if [ -z "${REG_IP}" ]; then
             echo "  Warning: could not determine registry IP on kind network, falling back to container name."
@@ -404,6 +431,26 @@ EOF"
     if [ "${KIND_BLOCK_STORAGE}" = true ]; then
         echo "=== Setting up Kind Block Storage ==="
         kind_block_install
+    fi 
+    
+    # Optional: verify docker.sock is accessible on the control-plane node.
+    # The socket is mounted at cluster-creation time via extraMounts (see above).
+    if [ "${SETUP_DOCKER_SOCKET:-false}" = "true" ]; then
+        echo "=== Verifying /var/run/docker.sock on control-plane node (SETUP_DOCKER_SOCKET=true) ==="
+        CP_NODE=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null | grep control-plane | head -1)
+        if [ -z "${CP_NODE}" ]; then
+            CP_NODE=$(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
+        fi
+        if [ -n "${CP_NODE}" ]; then
+            if ${CONTAINER_TOOL} exec "${CP_NODE}" test -S /var/run/docker.sock 2>/dev/null; then
+                echo "  /var/run/docker.sock is accessible on ${CP_NODE}."
+            else
+                echo "  Warning: /var/run/docker.sock is not a socket on ${CP_NODE}."
+                echo "  If this is an existing cluster, delete it and re-run setup with SETUP_DOCKER_SOCKET=true."
+            fi
+        else
+            echo "  Warning: could not find control-plane node."
+        fi
     fi
 fi
 
