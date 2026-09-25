@@ -70,7 +70,7 @@ make dev-teardown       # destroys the Kind cluster (Kind only)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) (v0.22.0+, for K8s 1.29+ compatibility)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) or [oc](https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/)
 - [Docker](https://docs.docker.com/get-docker/) or [Podman](https://podman.io/getting-started/installation)
-- [operator-sdk](https://sdk.operatorframework.io/docs/installation/) (optional, for OLM bundle testing)
+- `curl` (used to download pinned OLM test tools)
 
 ### System limits
 
@@ -181,6 +181,39 @@ Re-running `make dev-setup` on an existing cluster is safe — it re-applies con
 
 **Note:** Each operator deploys into its own namespace (e.g. `self-node-remediation`, `node-healthcheck-operator-system`) as defined in its kustomization files (either `config/default/kustomization.yaml` or a component/patch kustomization). The `dev-deploy` target automatically creates cert-manager certificates, patches the deployment to mount webhook TLS secrets, and waits for the deployment to become ready. If NHC and a remediator (SNR, FAR, or MDR) are both deployed, it also creates a NodeHealthCheck CR linking them.
 
+## Source-to-OLM and upgrade catalogs
+
+The same `dev.mk` include can build temporary operator, operand, bundle, and file-based catalog images for CI or an external cluster. Product-specific bundle metadata remains owned by each operator Makefile. If `config/manifests/ocp` exists, `bundle-build-ocp` is used automatically; otherwise the default is `bundle-build`.
+
+The shared targets download pinned `operator-sdk` and `opm` binaries into `bin/dev-olm`. Bundle generation runs directly in the operator checkout. An agent Dockerfile matching `cmd/*agent*/Dockerfile` is built, pushed, and supplied as `AGENT_IMG`; this covers Storage Based Remediation.
+
+```bash
+# Build and push the source operator and bundle to ttl.sh.
+DEV_REGISTRY=ttl.sh make dev-olm-build-push
+
+# Build and push a catalog connecting the latest released bundle to this source.
+DEV_REGISTRY=ttl.sh make dev-olm-catalog-push \
+  PREVIOUS_VERSION=0.12.1 \
+  DEV_OLM_PREVIOUS_BUNDLE_IMAGE=registry.redhat.io/workload-availability/node-healthcheck-operator-bundle:v0.12.1
+
+# Install, upgrade, or remove a temporary bundle on the current cluster.
+DEV_REGISTRY=ttl.sh make dev-olm-deploy
+DEV_REGISTRY=ttl.sh make dev-olm-upgrade
+make dev-olm-undeploy
+```
+
+The catalog target renders both bundle images and uses their actual FBC bundle names to construct the channel. Set `DEV_OLM_EXTRA_BUILD_TARGETS` for other operator-owned build targets, or override `DEV_OLM_BUNDLE_BUILD_TARGET` when an operator uses a different product bundle target.
+
+NHC's product bundle references separately released console-plugin and must-gather images. Supply both as digest pullspecs; the target rejects NHC builds that rely on version-tag defaults:
+
+```bash
+CONSOLE_PLUGIN_IMAGE=quay.io/example/console@sha256:... \
+MUST_GATHER_IMAGE=quay.io/example/must-gather@sha256:... \
+DEV_REGISTRY=ttl.sh make dev-olm-build-push
+```
+
+`dev-olm-deploy` labels the Self Node Remediation namespace for privileged workloads before installation. Override `DEV_OLM_OPERATOR_NAMESPACE`, `DEV_OLM_INSTALL_MODE`, or `DEV_OLM_SECURITY_CONTEXT_CONFIG` when required.
+
 ## Failure Simulations
 
 | Command | What it does |
@@ -224,6 +257,12 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 | `dev-undeploy` | Remove operator from cluster |
 | `dev-bundle-run` | Deploy operator via OLM bundle (requires operator-sdk) |
 | `dev-bundle-cleanup` | Remove OLM bundle deployment |
+| `dev-olm-build-push` | Build and push source operator and bundle images |
+| `dev-olm-catalog-build` | Build an FBC image for source upgrade testing |
+| `dev-olm-catalog-push` | Build and push the source upgrade FBC image |
+| `dev-olm-deploy` | Build and install the source bundle with OLM |
+| `dev-olm-upgrade` | Build and upgrade an existing source bundle installation |
+| `dev-olm-undeploy` | Remove an operator-sdk bundle installation |
 | `dev-create-nhc` | Create NodeHealthCheck CR (auto-detects SNR/FAR/MDR remediator) |
 | `dev-logs` | Tail operator controller-manager logs |
 | `dev-describe` | Full summary (nodes, pods, CRs, leases, events) |
