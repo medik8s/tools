@@ -72,6 +72,36 @@ after they come back. Device recreation is best effort; errors are suppressed.
 The cluster must have been prepared for this setup, typically with
 `SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`.
 
+### FAR with `fence_docker`
+
+FAR uses a different Kind flow. Its `fence_docker` agent power-cycles worker
+Kind containers through the container engine socket; the reboot watcher does
+not wait for FAR remediation objects and should not be started for FAR fencing
+tests. The watcher supports only `snr` and `sbr` modes.
+
+Create the cluster with the host socket mounted into its control-plane node
+before deploying FAR:
+
+```bash
+SETUP_DOCKER_SOCKET=true make dev-setup
+```
+
+This option must be set when the cluster is created because Kind cannot add
+the socket mount to an existing node. To enable it on an existing cluster,
+recreate the cluster first:
+
+```bash
+make dev-teardown
+SETUP_DOCKER_SOCKET=true make dev-setup
+```
+
+For Podman or a non-default socket location, set `CONTAINER_SOCKET_PATH` to
+the host socket path as well. Setup mounts that path at
+`/var/run/docker.sock` inside the control-plane node and checks that the
+socket is available there. The FAR manager pod uses this socket to control
+worker containers, so deploy FAR with an e2e image that includes
+`fence_docker`; the shipped operator image does not include that agent.
+
 ## Timeout and restart behavior
 
 The timeout is a per-node maximum wait for the mode's remediation signal. It
