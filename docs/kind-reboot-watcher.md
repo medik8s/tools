@@ -5,6 +5,16 @@ container act like a machine that reboots after remediation. It is a helper for
 development and end-to-end tests that need to exercise what happens after a
 node is fenced or told to reboot.
 
+The script has two distinct personalities depending on `--mode`:
+
+- **Watcher modes** (`snr`, `sbr`): long-running daemon that watches all
+  worker nodes and restarts their containers when kubelet stops and the
+  expected remediation signal arrives.
+- **Fence agent mode** (`far`): one-shot command that acts as a fence agent
+  for FenceAgentsRemediation (FAR) on Kind. Receives standard fence agent
+  arguments (`--action`, `--plug`) and calls the Docker REST API directly
+  via the Unix socket, then exits.
+
 Kind nodes are containers sharing the host kernel. A reboot request from an
 operator cannot reboot an individual Kind node the way it would reboot a real
 machine. The watcher fills that gap by observing stopped kubelets, waiting for
@@ -37,7 +47,7 @@ its in-progress list once its kubelet is active again.
 ## Remediation modes
 
 The mode determines what signal the watcher waits for before restarting a
-node. The default is `snr`.
+node, or (for `far`) the action to take immediately. The default is `snr`.
 
 ### SNR mode
 
@@ -72,35 +82,49 @@ after they come back. Device recreation is best effort; errors are suppressed.
 The cluster must have been prepared for this setup, typically with
 `SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`.
 
-### FAR with `fence_docker`
+### FAR mode
 
-FAR uses a different Kind flow. Its `fence_docker` agent power-cycles worker
-Kind containers through the container engine socket; the reboot watcher does
-not wait for FAR remediation objects and should not be started for FAR fencing
-tests. The watcher supports only `snr` and `sbr` modes.
+FAR mode is a one-shot fence agent, not a watcher. It is designed to be
+installed inside the FAR operator image and invoked by the FAR controller as
+a replacement for `fence_docker` on Kind clusters.
 
-Create the cluster with the host socket mounted into its control-plane node
-before deploying FAR:
+When `--mode far` is set, the script reads `--action` and `--plug`, then
+calls the Docker REST API via `--unix-socket` (default:
+`/var/run/docker.sock`) using `curl`. It exits immediately after the call
+succeeds or fails:
+
+| Action | Docker API call | Success output |
+| --- | --- | --- |
+| `reboot` | `POST /containers/{name}/restart` | exit 0 |
+| `on` | `POST /containers/{name}/start` | exit 0 |
+| `off` | `POST /containers/{name}/stop` | exit 0 |
+| `status` | `GET /containers/{name}/json` | `Status: ON` + exit 0 if running; `Status: OFF` + exit 1 otherwise |
+
+The `status` action is used by the FART (FenceAgentsRemediationTemplate) validation
+controller, which calls `fence_kind --action status` for each node before marking
+the template valid. It checks the output for `Status: ON` (case-insensitive).
+
+`curl` is used instead of the `docker` CLI so the script can run inside
+operator pods that have no container tool in `PATH`. `common.sh` is not
+sourced in this mode (it would fail because `kubectl` and `docker`/`podman`
+are absent). Any extra arguments passed by the FAR controller (for example
+`--ip` or `--disable-ssl`) are silently ignored.
+
+Exit code is `0` on HTTP 204 (success) and `1` on any other response.
+
+**Socket path**: the host socket (Docker at `/var/run/docker.sock`, or a
+Podman socket at a user-specific path) is bind-mounted into the Kind
+control-plane node and then re-mounted into the FAR manager pod. The mount
+point inside the pod is always `/var/run/docker.sock` regardless of the
+host-side path, so `--unix-socket` in the FAR CR spec and in `fence_kind`
+always use that fixed path. The `local-run.sh` script detects the correct
+host socket automatically and passes it to the Kind cluster setup. If
+auto-detection picks the wrong path, set `CONTAINER_SOCKET_PATH` to override
+it:
 
 ```bash
-SETUP_DOCKER_SOCKET=true make dev-setup
+CONTAINER_SOCKET_PATH=/run/user/1000/podman/podman.sock ./hack/local-run.sh
 ```
-
-This option must be set when the cluster is created because Kind cannot add
-the socket mount to an existing node. To enable it on an existing cluster,
-recreate the cluster first:
-
-```bash
-make dev-teardown
-SETUP_DOCKER_SOCKET=true make dev-setup
-```
-
-For Podman or a non-default socket location, set `CONTAINER_SOCKET_PATH` to
-the host socket path as well. Setup mounts that path at
-`/var/run/docker.sock` inside the control-plane node and checks that the
-socket is available there. The FAR manager pod uses this socket to control
-worker containers, so deploy FAR with an e2e image that includes
-`fence_docker`; the shipped operator image does not include that agent.
 
 ## Timeout and restart behavior
 
@@ -153,6 +177,14 @@ You can run the script directly to set all options explicitly:
 ./dev/kind-reboot-watcher.sh --name medik8s-dev --mode sbr --delay 420
 ```
 
+For FAR, the script is invoked as a one-shot fence agent (typically by the FAR
+controller inside the operator pod, not by hand):
+
+```bash
+./dev/kind-reboot-watcher.sh --mode far --action reboot --plug medik8s-dev-worker \
+    --unix-socket /var/run/docker.sock
+```
+
 Stop a background watcher with `make dev-reboot-watcher-stop`. That target
 uses `pkill -f kind-reboot-watcher.sh`, so it stops matching watcher processes
 on the local machine. When running the script directly in a terminal, use
@@ -166,10 +198,13 @@ does not wait for the node to become Ready again.
 
 | Option or environment variable | Default | Purpose |
 | --- | --- | --- |
-| `--name <cluster>` / `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster to watch. |
-| `--delay <seconds>` / `MEDIK8S_REBOOT_DELAY` | `300` | Maximum seconds to wait for a remediation signal per detected node. |
-| `--mode <snr-or-sbr>` / `MEDIK8S_REBOOT_WATCHER_MODE` | `snr` | Select the SNR CR or SBR fencing condition to wait for. |
-| `--once` | off | Exit after handling the first qualifying node. |
+| `--name <cluster>` / `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster to watch (watcher modes only). |
+| `--delay <seconds>` / `MEDIK8S_REBOOT_DELAY` | `300` | Maximum seconds to wait for a remediation signal per detected node (watcher modes only). |
+| `--mode <snr\|sbr\|far>` / `MEDIK8S_REBOOT_WATCHER_MODE` | `snr` | `snr`: wait for SelfNodeRemediation CR. `sbr`: wait for SBR FencingSucceeded. `far`: one-shot fence agent via Docker socket. |
+| `--once` | off | Exit after handling the first qualifying node (watcher modes only). |
+| `--action <reboot\|on\|off>` | — | Action to execute (`far` mode only). |
+| `--plug <container>` | — | Container name to act on (`far` mode only). |
+| `--unix-socket <path>` | `/var/run/docker.sock` | Docker socket path for the REST API call (`far` mode only). |
 
 The script also uses `KUBECTL` and `CONTAINER_TOOL` if set; otherwise it
 inherits the command selection from [`common.sh`](../dev/common.sh). `--help` prints
@@ -177,13 +212,13 @@ the command usage and exits.
 
 ## What this does and does not simulate
 
-The watcher restarts the **Kind node container**. That stops and starts the
-container and its kubelet, which approximates the node restart/rejoin portion
-of a real remediation flow. It does not restart the host, issue a real hardware
-reboot, validate that physical fencing worked, or provide a general-purpose
-watchdog service. It depends on Kind, access to the selected node containers,
-and Kubernetes API access. It is not the watcher to use for an external
-OpenShift cluster.
+In watcher modes (`snr`, `sbr`), the script restarts the **Kind node
+container**. That stops and starts the container and its kubelet, which
+approximates the node restart/rejoin portion of a real remediation flow. It
+does not restart the host, issue a real hardware reboot, validate that physical
+fencing worked, or provide a general-purpose watchdog service. It depends on
+Kind, access to the selected node containers, and Kubernetes API access. It is
+not the watcher to use for an external OpenShift cluster.
 
 For SNR, the observed CR is evidence that remediation was requested; the
 watcher does not inspect the remediation CR's completion status before
@@ -191,7 +226,25 @@ restarting. For SBR, it specifically waits for `FencingSucceeded=True`. In
 both modes, the timeout fallback can restart the container without seeing the
 expected signal.
 
+In fence agent mode (`far`), the script acts as a thin replacement for
+`fence_docker` on Kind. It does not watch nodes or wait for signals; it simply
+calls the Docker REST API for the named container and exits. No separate
+reboot watcher is needed alongside FAR because FAR itself drives the fence
+action directly.
+
 ## Implementation map
+
+**FAR fence agent mode** (runs before `common.sh` is sourced; exits immediately):
+
+- Arg parsing runs first so `--mode far` is detected without requiring
+  `kubectl` or a container tool in `PATH`.
+- `docker_api`: issues a `curl --unix-socket` POST to the Docker REST API and
+  returns the HTTP status code.
+- Actions `reboot`, `on`, `off` map to `/containers/{plug}/restart|start|stop`.
+- Unknown arguments are silently ignored so the FAR controller can pass its
+  standard fence agent parameters without modification.
+
+**Watcher modes** (`snr`, `sbr`; run after `common.sh` is sourced):
 
 - `get_worker_nodes`: lists Kind node containers and selects names containing
   `worker`.
