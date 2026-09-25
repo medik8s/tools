@@ -55,6 +55,9 @@ endif
 MEDIK8S_REGISTRY_NAME ?= kind-registry
 MEDIK8S_REGISTRY_PORT ?= 5000
 DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),registry,ttl.sh)
+ifneq ($(filter $(DEV_REGISTRY),registry local ttl.sh),$(DEV_REGISTRY))
+  $(error Unsupported DEV_REGISTRY "$(DEV_REGISTRY)". Expected registry, local, or ttl.sh.)
+endif
 
 # Target platform for images to build
 DEV_PLATFORM ?= linux/amd64
@@ -155,8 +158,9 @@ ifeq ($(DEV_REGISTRY),local)
 		fi; \
 	done; \
 	restore() { for f in $$patched; do sed -i.bak 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Always/' "$$f" && rm -f "$$f.bak"; done; }; \
-	TMPTAR=$$(mktemp /tmp/dev-image-XXXXXX.tar); \
-	cleanup() { rm -f "$$TMPTAR"; restore; }; \
+	TMP_IMAGE_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/dev-image.XXXXXX"); \
+	TMPTAR="$$TMP_IMAGE_DIR/image.tar"; \
+	cleanup() { rm -rf "$$TMP_IMAGE_DIR"; restore; }; \
 	trap cleanup EXIT; \
 	$(CONTAINER_TOOL) build -t $(DEV_IMG) . && \
 	$(CONTAINER_TOOL) save -o "$$TMPTAR" $(DEV_IMG) && \
@@ -488,7 +492,7 @@ dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sd
 
 dev-olm-upgrade: dev-olm-build-push ## Upgrade an existing operator-sdk bundle installation
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle-upgrade "$(DEV_OLM_BUNDLE_IMAGE)" \
-		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
+		--security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
 
 dev-olm-undeploy: dev-olm-operator-sdk ## Remove an operator-sdk bundle installation
 	@if ! $(KUBECTL) get namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1; then \
