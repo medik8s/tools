@@ -725,6 +725,10 @@ dev-ci-debug: ## Print debug info for CI failures (OLM status, deployments, pods
 	@echo "=== Recent Events ==="
 	@$(KUBECTL) get events -A --sort-by=.lastTimestamp 2>/dev/null | tail -30
 
+.PHONY: dev-rbac-check
+dev-rbac-check: ## Verify RBAC correctness for non-OLM deployment (RHWA-1623)
+	@$(DEV_DIR)/verify-rbac.sh
+
 .PHONY: dev-help
 dev-help: ## Show dev environment help
 	@echo "Medik8s Development Environment"
@@ -750,6 +754,7 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-events             Show recent remediation-related events"
 	@echo "  make dev-wait               Wait for all operator pods to be ready"
 	@echo "  make dev-shell              Open shell on a Kind node (NODE=<name>)"
+	@echo "  make dev-rbac-check         Verify RBAC correctness (non-OLM)"
 	@echo ""
 	@echo "Simulate Failures:"
 	@echo "  make dev-simulate-failure   Stop kubelet on a worker"
@@ -758,6 +763,9 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-recover            Recover all workers"
 	@echo "  make dev-reboot-watcher     Start background watcher (simulates reboot on Kind)"
 	@echo "  make dev-reboot-watcher-stop  Stop the reboot watcher"
+	@echo ""
+	@echo "Verify:"
+	@echo "  make dev-rbac-check         Verify RBAC correctness (non-OLM)"
 	@echo ""
 	@echo "CI:"
 	@echo "  make dev-ci-debug           Print debug info for CI failures"
