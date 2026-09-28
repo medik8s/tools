@@ -26,6 +26,8 @@
 #                   uses curl to speak directly to the Docker socket. This lets
 #                   the script run inside the FAR operator pod where only curl
 #                   is available.
+#   mdr           — simulates one Machine deletion and prepared-spare replacement.
+#                   Requires --once and --state-dir from the MDR Kind E2E runner.
 #
 # A configurable timeout (--delay) acts as a safety fallback: if the expected
 # signal does not appear within that time, the container is restarted anyway to
@@ -52,6 +54,7 @@ SOCKET="/var/run/docker.sock"
 CR_POLL_INTERVAL=5
 POLL_INTERVAL=5
 ONCE=false
+STATE_DIR=""
 
 usage() {
     echo "Usage: $0 [--name <cluster>] [--delay <seconds>] [--once] [--mode snr|sbr|far|mdr]"
@@ -63,7 +66,8 @@ usage() {
     echo "  --name <cluster>       Kind cluster name (default: medik8s-dev)"
     echo "  --delay <seconds>      Max wait for remediation signal before forced reboot (default: 300)"
     echo "  --once                 Exit after first reboot (for CI)"
-    echo "  --mode snr|sbr|far     Remediation mode (default: snr)"
+    echo "  --mode snr|sbr|far|mdr Remediation mode (default: snr)"
+    echo "  --state-dir <path>     Prepared fixture directory (mdr requires --once)"
     echo "  --action reboot|on|off|status Action for --mode far"
     echo "  --plug <container>     Container name for --mode far"
     echo "  --unix-socket <path>   Docker socket path for --mode far (default: /var/run/docker.sock)"
@@ -71,7 +75,7 @@ usage() {
     echo "Environment variables:"
     echo "  MEDIK8S_CLUSTER_NAME         Cluster name (default: medik8s-dev)"
     echo "  MEDIK8S_REBOOT_DELAY         Max wait for signal in seconds (default: 300)"
-    echo "  MEDIK8S_REBOOT_WATCHER_MODE  Mode: snr, sbr, far (default: snr)"
+    echo "  MEDIK8S_REBOOT_WATCHER_MODE  Mode: snr, sbr, far, mdr (default: snr)"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -79,6 +83,7 @@ while [[ $# -gt 0 ]]; do
         --name) CLUSTER_NAME="$2"; shift 2 ;;
         --delay) REBOOT_DELAY="$2"; shift 2 ;;
         --once) ONCE=true; shift ;;
+        --state-dir) STATE_DIR="$2"; shift 2 ;;
         --mode=*) MODE="${1#*=}"; shift ;;
         --mode) MODE="$2"; shift 2 ;;
         --action=*) ACTION="${1#*=}"; shift ;;
@@ -88,27 +93,7 @@ while [[ $# -gt 0 ]]; do
         --unix-socket=*) SOCKET="${1#*=}"; shift ;;
         --unix-socket) SOCKET="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: $0 [--name <cluster>] [--delay <seconds>] [--once] [--mode snr|sbr|far]"
-            echo ""
-            echo "Watches Kind worker nodes and restarts their containers when"
-            echo "kubelet stops (simulating hardware reboot for e2e tests)."
-            echo ""
-            echo "Options:"
-            echo "  --name <cluster>       Kind cluster name (default: medik8s-dev)"
-            echo "  --delay <seconds>      Max wait for remediation signal before forced reboot (default: 300)"
-            echo "  --once                 Exit after first reboot (for CI)"
-            echo "  --mode snr|sbr|far     Remediation mode (default: snr)"
-            echo "                           snr: wait for SelfNodeRemediation CR"
-            echo "                           sbr: wait for StorageBasedRemediation FencingSucceeded=True"
-            echo "                           far: fence agent mode — one-shot restart via Docker socket"
-            echo "  --action reboot|on|off|status Action for --mode far"
-            echo "  --plug <container>     Container name for --mode far"
-            echo "  --unix-socket <path>   Docker socket path for --mode far (default: /var/run/docker.sock)"
-            echo ""
-            echo "Environment variables:"
-            echo "  MEDIK8S_CLUSTER_NAME         Cluster name (default: medik8s-dev)"
-            echo "  MEDIK8S_REBOOT_DELAY         Max wait for signal in seconds (default: 300)"
-            echo "  MEDIK8S_REBOOT_WATCHER_MODE  Mode: snr, sbr, or far (default: snr)"
+            usage
             exit 0
             ;;
         *)
@@ -173,8 +158,13 @@ if [[ "$MODE" == "far" ]]; then
     esac
 fi
 
+if [[ "$MODE" == "mdr" ]]; then
+    [[ "$ONCE" == true && -n "$STATE_DIR" ]] || { echo "Error: mdr requires --once and --state-dir"; exit 1; }
+    exec python3 "${SCRIPT_DIR}/kind_mdr.py" watch --name "$CLUSTER_NAME" --state-dir "$STATE_DIR"
+fi
+
 if [[ "$MODE" != "snr" && "$MODE" != "sbr" ]]; then
-    echo "Error: --mode must be 'snr', 'sbr', or 'far', got: '$MODE'"
+    echo "Error: --mode must be 'snr', 'sbr', 'far', or 'mdr', got: '$MODE'"
     exit 1
 fi
 

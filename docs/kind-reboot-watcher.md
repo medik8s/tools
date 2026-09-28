@@ -262,3 +262,7 @@ action directly.
   handling with `REBOOTING`, and clears that state when `Ready=True`.
 - A background handler waits for the signal or timeout, restarts the
   container, and in SBR mode recreates the null watchdog device.
+
+## MDR Machine replacement
+
+For the host-side `--mode mdr` simulator, see [Kind MDR simulation](kind-mdr.md).
