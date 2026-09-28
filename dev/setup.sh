@@ -302,13 +302,25 @@ json.dump(d,sys.stdout,indent=2)
 
         EFFECTIVE_KIND_CONFIG="${KIND_CONFIG}"
         if [ "${SETUP_DOCKER_SOCKET:-false}" = "true" ]; then
+            echo "WARNING: SETUP_DOCKER_SOCKET exposes the host container runtime socket to each control-plane node." >&2
+            echo "  Socket access allows container escape and is host-root-equivalent for rootful Docker/Podman." >&2
+            echo "  For rootless runtimes, it grants the runtime user's host privileges. Use only in isolated, trusted dev/CI environments." >&2
             echo "  Adding docker.sock extraMounts to kind config for control-plane node..."
-            EFFECTIVE_KIND_CONFIG=$(mktemp)".yaml"
+            EFFECTIVE_KIND_CONFIG=$(mktemp)
+            trap 'rm -f "${EFFECTIVE_KIND_CONFIG}"' EXIT
             # Host socket path: from CONTAINER_SOCKET_PATH env (supports Podman) or default Docker path.
             # Always mounted at /var/run/docker.sock inside the node so the Deployment patch is static.
             HOST_SOCK="${CONTAINER_SOCKET_PATH:-/var/run/docker.sock}"
             python3 - "${KIND_CONFIG}" "${EFFECTIVE_KIND_CONFIG}" "${HOST_SOCK}" <<'PYEOF'
-import sys, yaml
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(
+        "Error: SETUP_DOCKER_SOCKET=true requires PyYAML for python3.\n"
+        "Install your OS's python3-yaml package, or run 'python3 -m pip install PyYAML' "
+        "in an activated virtual environment, then rerun setup."
+    )
 src, dst, host_sock = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(src) as f:
     cfg = yaml.safe_load(f)
@@ -322,7 +334,6 @@ for node in nodes:
 with open(dst, 'w') as f:
     yaml.dump(cfg, f, default_flow_style=False)
 PYEOF
-            trap 'rm -f "${EFFECTIVE_KIND_CONFIG}"' EXIT
         fi
         kind create cluster --config "${EFFECTIVE_KIND_CONFIG}" --name "${CLUSTER_NAME}"
     else

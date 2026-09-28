@@ -9,7 +9,7 @@
 # stopped), it waits for a remediation signal before restarting the Kind
 # container — simulating what a real reboot does.
 #
-# Three modes (--mode):
+# Modes (--mode):
 #   snr (default) — waits for a SelfNodeRemediation CR to appear for the node.
 #                   This ensures NHC has triggered remediation before reboot,
 #                   avoiding races with controller leader failover.
@@ -53,6 +53,27 @@ CR_POLL_INTERVAL=5
 POLL_INTERVAL=5
 ONCE=false
 
+usage() {
+    echo "Usage: $0 [--name <cluster>] [--delay <seconds>] [--once] [--mode snr|sbr|far|mdr]"
+    echo ""
+    echo "Watches Kind worker nodes and restarts their containers when"
+    echo "kubelet stops (simulating hardware reboot for e2e tests)."
+    echo ""
+    echo "Options:"
+    echo "  --name <cluster>       Kind cluster name (default: medik8s-dev)"
+    echo "  --delay <seconds>      Max wait for remediation signal before forced reboot (default: 300)"
+    echo "  --once                 Exit after first reboot (for CI)"
+    echo "  --mode snr|sbr|far     Remediation mode (default: snr)"
+    echo "  --action reboot|on|off|status Action for --mode far"
+    echo "  --plug <container>     Container name for --mode far"
+    echo "  --unix-socket <path>   Docker socket path for --mode far (default: /var/run/docker.sock)"
+    echo ""
+    echo "Environment variables:"
+    echo "  MEDIK8S_CLUSTER_NAME         Cluster name (default: medik8s-dev)"
+    echo "  MEDIK8S_REBOOT_DELAY         Max wait for signal in seconds (default: 300)"
+    echo "  MEDIK8S_REBOOT_WATCHER_MODE  Mode: snr, sbr, far (default: snr)"
+}
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --name) CLUSTER_NAME="$2"; shift 2 ;;
@@ -90,7 +111,11 @@ while [[ $# -gt 0 ]]; do
             echo "  MEDIK8S_REBOOT_WATCHER_MODE  Mode: snr, sbr, or far (default: snr)"
             exit 0
             ;;
-        *) shift ;;  # ignore unknown args (fence agent may pass extra params)
+        *)
+            printf "Error: unknown argument '%s'\n" "$1" >&2
+            usage >&2
+            exit 1
+            ;;
     esac
 done
 
@@ -99,6 +124,10 @@ done
 if [[ "$MODE" == "far" ]]; then
     [[ -z "$ACTION" ]] && { echo "Error: --mode far requires --action"; exit 1; }
     [[ -z "$PLUG" ]] && { echo "Error: --mode far requires --plug"; exit 1; }
+    if [[ ! "$PLUG" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        echo "Error: invalid --plug: start with a letter or digit and use only letters, digits, underscores, periods, or hyphens." >&2
+        exit 1
+    fi
 
     docker_api() {
         local path="$1"

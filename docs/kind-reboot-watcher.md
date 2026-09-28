@@ -8,7 +8,7 @@ node is fenced or told to reboot.
 The script has two distinct personalities depending on `--mode`:
 
 - **Watcher modes** (`snr`, `sbr`): long-running daemon that watches all
-  worker nodes and restarts their containers when kubelet stops and the
+  worker nodes and restarts their containers when they remain NotReady and the
   expected remediation signal arrives.
 - **Fence agent mode** (`far`): one-shot command that acts as a fence agent
   for FenceAgentsRemediation (FAR) on Kind. Receives standard fence agent
@@ -24,25 +24,24 @@ Kubernetes node rejoin.
 
 ## What it watches
 
-The watcher gets worker container names from `kind get nodes --name
-<cluster-name>` and keeps checking them. A worker is considered ready for
-handling when **both** of these conditions are true:
+In `snr` and `sbr` modes, the watcher gets worker container names from
+`kind get nodes --name <cluster-name>` and checks the Kubernetes `Ready`
+condition. If it is not `True`, the watcher waits ten seconds and checks again.
+Handling starts only if the node is still not Ready. It does not inspect the
+kubelet service, so it can handle both stopped kubelets and network partitions.
 
-1. Kubernetes does not report that node's `Ready` condition as `True`.
-2. `systemctl is-active kubelet` inside the Kind node container says kubelet
-   is not active.
-
-This combination avoids treating a temporarily NotReady node with a still
-running kubelet as a reboot request. The cluster is checked on each pass; if
+The recheck gives transient NotReady states time to recover before a restart
+is scheduled. The cluster is checked on each pass; if
 the named cluster no longer exists, the watcher logs that fact and exits
 successfully.
 
-The main worker scan repeats every five seconds. Once a worker meets the
-stopped-kubelet condition, the watcher marks it as being handled so it does not
+The main loop sleeps five seconds between scans, in addition to the ten-second
+recheck for each newly unready worker. Once a worker qualifies,
+the watcher marks it as being handled so it does not
 start another restart job for the same node. Restart handling runs in a
 background process, so different failed workers can wait for their signals in
 parallel. The main process continues checking nodes and removes a node from
-its in-progress list once its kubelet is active again.
+its in-progress list once its `Ready` condition is `True` again.
 
 ## Remediation modes
 
@@ -51,7 +50,7 @@ node, or (for `far`) the action to take immediately. The default is `snr`.
 
 ### SNR mode
 
-For the stopped worker, the watcher looks for a
+For the NotReady worker, the watcher looks for a
 `SelfNodeRemediation` object with a matching name across all namespaces. When
 the worker first qualifies, it records the current object's UID as a baseline.
 It then polls every five seconds until it sees an object with a **different
@@ -63,7 +62,7 @@ mode does not recreate `/dev/watchdog` after restart.
 
 ### SBR mode
 
-For the stopped worker, the watcher looks for a
+For the NotReady worker, the watcher looks for a
 `StorageBasedRemediation` object with a matching name across all namespaces.
 It records the current object's UID as a baseline and polls every five seconds
 for a new object whose `FencingSucceeded` condition has status `True`. Both
@@ -93,12 +92,12 @@ calls the Docker REST API via `--unix-socket` (default:
 `/var/run/docker.sock`) using `curl`. It exits immediately after the call
 succeeds or fails:
 
-| Action | Docker API call | Success output |
-| --- | --- | --- |
-| `reboot` | `POST /containers/{name}/restart` | exit 0 |
-| `on` | `POST /containers/{name}/start` | exit 0 |
-| `off` | `POST /containers/{name}/stop` | exit 0 |
-| `status` | `GET /containers/{name}/json` | `Status: ON` + exit 0 if running; `Status: OFF` + exit 1 otherwise |
+| Action | Docker API call | Exit 0 | Exit 1 |
+| --- | --- | --- | --- |
+| `reboot` | `POST /containers/{name}/restart` | HTTP 204; prints `Status: ON` | Any other HTTP status; prints `restart failed (HTTP ...)` |
+| `on` | `POST /containers/{name}/start` | HTTP 204 or 304 (already started); prints `Status: ON` | Any other HTTP status; prints `start failed (HTTP ...)` |
+| `off` | `POST /containers/{name}/stop` | HTTP 204 or 304 (already stopped); prints `Status: OFF` | Any other HTTP status; prints `stop failed (HTTP ...)` |
+| `status` | `GET /containers/{name}/json` | HTTP 200 with `Running=true`; prints `Status: ON` | Non-200 HTTP status or a parsed `Running` value other than `true`; prints `Status: OFF` |
 
 The `status` action is used by the FART (FenceAgentsRemediationTemplate) validation
 controller, which calls `fence_kind --action status` for each node before marking
@@ -110,20 +109,24 @@ sourced in this mode (it would fail because `kubectl` and `docker`/`podman`
 are absent). Any extra arguments passed by the FAR controller (for example
 `--ip` or `--disable-ssl`) are silently ignored.
 
-Exit code is `0` on HTTP 204 (success) and `1` on any other response.
+The table assumes `curl` completes successfully. Transport failures propagate
+curl's nonzero exit code (for example, `7` for a connection failure), without a
+`Status:` message. If an HTTP 200 status response has no matching `Running`
+field, the parsing pipeline exits with code `1`, also without a `Status:` message.
+Missing `--action` or `--plug`, or an unsupported action, exits with code `1`
+and an error message.
 
 **Socket path**: the host socket (Docker at `/var/run/docker.sock`, or a
 Podman socket at a user-specific path) is bind-mounted into the Kind
 control-plane node and then re-mounted into the FAR manager pod. The mount
 point inside the pod is always `/var/run/docker.sock` regardless of the
 host-side path, so `--unix-socket` in the FAR CR spec and in `fence_kind`
-always use that fixed path. The `local-run.sh` script detects the correct
-host socket automatically and passes it to the Kind cluster setup. If
-auto-detection picks the wrong path, set `CONTAINER_SOCKET_PATH` to override
-it:
+always use that fixed path. Set `CONTAINER_SOCKET_PATH` when running
+[`dev/setup.sh`](../dev/setup.sh) to use a host socket other than
+`/var/run/docker.sock`:
 
 ```bash
-CONTAINER_SOCKET_PATH=/run/user/1000/podman/podman.sock ./hack/local-run.sh
+SETUP_DOCKER_SOCKET=true CONTAINER_SOCKET_PATH=/run/user/1000/podman/podman.sock ./dev/setup.sh
 ```
 
 ## Timeout and restart behavior
@@ -241,6 +244,8 @@ action directly.
 - `docker_api`: issues a `curl --unix-socket` POST to the Docker REST API and
   returns the HTTP status code.
 - Actions `reboot`, `on`, `off` map to `/containers/{plug}/restart|start|stop`.
+- `status` uses a separate GET request to `/containers/{plug}/json` and checks
+  the `Running` field.
 - Unknown arguments are silently ignored so the FAR controller can pass its
   standard fence agent parameters without modification.
 
@@ -248,13 +253,12 @@ action directly.
 
 - `get_worker_nodes`: lists Kind node containers and selects names containing
   `worker`.
-- `is_node_not_ready`: reads the node's Ready condition through Kubernetes;
-  any value other than `True` is treated as not Ready.
-- `is_kubelet_running`: checks the kubelet service inside the node container.
+- `is_node_ready`: reads the node's Ready condition through Kubernetes and
+  succeeds only when it is `True`.
 - `get_snr_cr_uid` / `wait_for_remediation_cr`: find a fresh SNR object by UID.
 - `get_sbr_cr_fencing_state` / `wait_for_fencing`: find a fresh SBR object
   with `FencingSucceeded=True`.
-- The main loop detects stopped kubelets, prevents duplicate handling, and
-  watches for kubelet recovery.
+- The main loop rechecks NotReady nodes after ten seconds, prevents duplicate
+  handling with `REBOOTING`, and clears that state when `Ready=True`.
 - A background handler waits for the signal or timeout, restarts the
   container, and in SBR mode recreates the null watchdog device.
