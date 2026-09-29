@@ -5,7 +5,7 @@ A shared, consistent development environment for all medik8s operators.
 ## Quick Start
 
 For a lightweight shared raw block device on Kind, see
-[Kind block storage](kind-block.md). It is opt-in and does not change the default
+[Kind block storage](../dev/kind-block.md). It is opt-in and does not change the default
 cluster setup.
 
 ```bash
@@ -315,10 +315,12 @@ commands to run instead of executing them directly (safety first). Set
 |----------|---------|-------------|
 | `KIND_HA` | `false` | Set to `true` for HA cluster (3 CP + 3 workers, for SNR CP testing) |
 | `SKIP_KIND` | `false` | Set to `true` to skip Kind creation (external cluster) |
-| `DEV_REGISTRY` | `local` (Kind) / `ttl.sh` (external) | Image delivery: `local` or `ttl.sh` |
+| `DEV_REGISTRY` | `registry` (Kind) / `ttl.sh` (external) | Image delivery: `registry`, `local`, or `ttl.sh`. OLM bundles require a registry. |
 | `DEV_IMG` | auto-generated | Override to use a custom image name |
 | `TTL_SH_TTL` | `2h` | Image expiry when using ttl.sh |
 | `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster name |
+| `MEDIK8S_REGISTRY_NAME` | `kind-registry` | Local registry container name |
+| `MEDIK8S_REGISTRY_PORT` | `5000` | Local registry host port |
 | `CONTAINER_TOOL` | auto-detected | `docker` or `podman` |
 | `KUBECTL` | auto-detected | `kubectl` or `oc` |
 | `NHC_UNHEALTHY_DURATION` | `300s` | Unhealthy condition duration for NHC CR |
@@ -332,13 +334,13 @@ commands to run instead of executing them directly (safety first). Set
 | NMO | Full | Cordon, drain, PDB-aware eviction. Pod restarts on startup (missing namespace `list` RBAC — NMO bug, stabilizes after ~4 restarts). |
 | SNR | ~85% | Peer health, softdog watchdog, API check. No hardware watchdog. |
 | FAR | Real fencing on Kind via `fence_kind` (`SETUP_DOCKER_SOCKET=true`) | `fence_kind` power-cycles worker Kind containers over the host Docker socket. Run with `SETUP_DOCKER_SOCKET=true make dev-setup`. `fence_kind` is present only in the e2e image, not the shipped operator image. |
-| MDR | Controller logic | No Machine API — reconciliation testable via envtest (`make test`) |
+| MDR | Direct MDR E2E with simulated Machine replacement | Run `bash hack/local-run.sh all` from the MDR repo. Installs Machine CRDs and fixtures, deploys the standard operator through OLM, and uses `--mode mdr --once` to delete and replace a worker container. See [MDR simulation](kind-mdr.md). |
 | SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
 
 ## Limitations
 
 - **FAR fence agent execution** — `fence_kind` works on Kind (power-cycles worker containers); no IPMI/BMC or cloud APIs
-- **MDR Machine API** — Kind has no Machine objects
+- **MDR Machine API** — the MDR runner installs Machine/MachineSet CRDs and simulates one replacement per fixture. Cloud provisioning, physical fencing, NHC integration, and the separate system-tests suite are not covered.
 - **SBR shared storage** — no ODF
 - **Hardware watchdog** — only softdog (software)
 - **SNR `${IMG}` placeholders** — SNR manifests use `${IMG}` placeholders expanded by `envsubst`. The `dev-deploy` target handles this automatically, but running `kustomize build config/default | kubectl apply -f -` directly will produce `InvalidImageName` errors. The SNR controller reconciles DaemonSets from templates baked into the image, so image patches don't persist — always use `make dev-deploy` or `make dev-redeploy` for SNR.

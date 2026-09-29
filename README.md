@@ -34,6 +34,7 @@ make dev-simulate-failure
 - [Development environment](docs/DEV_README.md) — setup, configuration, targets,
   and workflows for using the shared Medik8s development environment.
 - [Kind reboot watcher](docs/kind-reboot-watcher.md) — what the watcher monitors,
-  how its SNR, SBR, and FAR modes work, how it restarts Kind nodes, and its
+  how its SNR, SBR, FAR, and MDR modes work, and their
   timeout, usage, and simulation limits.
-
+- [MDR Machine simulation](docs/kind-mdr.md) — Machine fixtures, container
+  deletion, and fresh-worker provisioning for MDR's Kind E2E suite.

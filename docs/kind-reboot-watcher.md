@@ -1,11 +1,11 @@
 # Kind reboot watcher
 
 [`kind-reboot-watcher.sh`](../dev/kind-reboot-watcher.sh) makes a Kind worker
-container act like a machine that reboots after remediation. It is a helper for
+container reboot or be replaced after remediation. It is a helper for
 development and end-to-end tests that need to exercise what happens after a
 node is fenced or told to reboot.
 
-The script has two distinct personalities depending on `--mode`:
+The script supports these modes:
 
 - **Watcher modes** (`snr`, `sbr`): long-running daemon that watches all
   worker nodes and restarts their containers when they remain NotReady and the
@@ -14,11 +14,13 @@ The script has two distinct personalities depending on `--mode`:
   for FenceAgentsRemediation (FAR) on Kind. Receives standard fence agent
   arguments (`--action`, `--plug`) and calls the Docker REST API directly
   via the Unix socket, then exits.
+- **MDR mode** (`mdr`): replaces a deleted fixture Machine with a fresh Kind
+  worker. Requires `--once`; see [MDR setup](kind-mdr.md).
 
 Kind nodes are containers sharing the host kernel. A reboot request from an
 operator cannot reboot an individual Kind node the way it would reboot a real
-machine. The watcher fills that gap by observing stopped kubelets, waiting for
-the appropriate remediation signal, and restarting the corresponding Kind
+machine. In SNR/SBR mode, the watcher observes NotReady nodes, waits for
+the appropriate remediation signal, and restarts the corresponding Kind
 node container. Restarting the container brings its kubelet back and makes the
 Kubernetes node rejoin.
 
@@ -46,7 +48,8 @@ its in-progress list once its `Ready` condition is `True` again.
 ## Remediation modes
 
 The mode determines what signal the watcher waits for before restarting a
-node, or (for `far`) the action to take immediately. The default is `snr`.
+node, or (for `far`) the action to take immediately. MDR waits for a fixture
+Machine deletion request instead of Node health. The default is `snr`.
 
 ### SNR mode
 
@@ -106,15 +109,16 @@ the template valid. It checks the output for `Status: ON` (case-insensitive).
 `curl` is used instead of the `docker` CLI so the script can run inside
 operator pods that have no container tool in `PATH`. `common.sh` is not
 sourced in this mode (it would fail because `kubectl` and `docker`/`podman`
-are absent). Any extra arguments passed by the FAR controller (for example
-`--ip` or `--disable-ssl`) are silently ignored.
+are absent). Unknown arguments, including `--ip` or `--disable-ssl`, are
+rejected with an error and usage output.
 
 The table assumes `curl` completes successfully. Transport failures propagate
 curl's nonzero exit code (for example, `7` for a connection failure), without a
 `Status:` message. If an HTTP 200 status response has no matching `Running`
 field, the parsing pipeline exits with code `1`, also without a `Status:` message.
-Missing `--action` or `--plug`, or an unsupported action, exits with code `1`
-and an error message.
+Missing `--action` or `--plug`, an invalid plug name, or an unsupported action
+exits with code `1` and an error message. Plug names must match
+`[a-zA-Z0-9][a-zA-Z0-9_.-]*`; validation happens before the API request.
 
 **Socket path**: the host socket (Docker at `/var/run/docker.sock`, or a
 Podman socket at a user-specific path) is bind-mounted into the Kind
@@ -131,9 +135,9 @@ SETUP_DOCKER_SOCKET=true CONTAINER_SOCKET_PATH=/run/user/1000/podman/podman.sock
 
 ## Timeout and restart behavior
 
-The timeout is a per-node maximum wait for the mode's remediation signal. It
-starts when the watcher detects that node's kubelet is stopped and the node is
-not Ready. If the signal does not appear in time, the watcher logs a timeout
+In SNR/SBR mode, the timeout is a per-node maximum wait for the remediation
+signal. It starts after the Node remains NotReady through the ten-second
+recheck. If the signal does not appear in time, the watcher logs a timeout
 and restarts the node anyway. This fallback prevents the test from waiting
 forever, but it means a container restart is **not proof** that remediation
 completed successfully.
@@ -141,17 +145,21 @@ completed successfully.
 The timeout defaults to 300 seconds. The script passes it to its signal-wait
 loop, which checks immediately and then sleeps in five-second increments.
 After restarting a container, the background handler logs that it is waiting
-for kubelet; the main watcher detects kubelet recovery on later scans.
+for kubelet; the main watcher detects `Ready=True` on later scans.
 
 Restart command error handling differs by mode:
 
 - SNR mode runs the container restart as a required command. If it fails, that
   background handler exits due to strict Bash error handling; the watcher does
   not retry that restart. The main process keeps the node marked in progress
-  until it sees kubelet active.
+  until it sees `Ready=True`.
 - SBR mode treats container restart and watchdog-device recreation as
   best-effort commands. It attempts device recreation even if the restart
   command failed.
+
+MDR has separate five-minute deletion-request and fifteen-minute replacement
+deadlines. A timeout fails the run; it never triggers forced recovery.
+`--delay` does not configure MDR.
 
 ## Start and stop
 
@@ -188,30 +196,34 @@ controller inside the operator pod, not by hand):
     --unix-socket /var/run/docker.sock
 ```
 
-Stop a background watcher with `make dev-reboot-watcher-stop`. That target
+Stop a background SNR/SBR watcher with `make dev-reboot-watcher-stop`. That target
 uses `pkill -f kind-reboot-watcher.sh`, so it stops matching watcher processes
 on the local machine. When running the script directly in a terminal, use
 Ctrl-C.
 
-`--once` exits after the first qualifying node is handled. It waits for that
-node's remediation signal or timeout and for the restart handler to finish; it
-does not wait for the node to become Ready again.
+In SNR/SBR mode, `--once` exits after the first qualifying node is handled.
+It waits for that node's remediation signal or timeout and for the restart handler to finish; it
+does not wait for the node to become Ready again. In MDR mode, `--once` is
+required and success means the replacement is Ready, networking is verified,
+and the Machine annotation and worker label have been published. MDR replaces
+the shell process with Python; stop its saved PID, as the generic stop target
+only matches the shell script name.
 
 ## Options
 
 | Option or environment variable | Default | Purpose |
 | --- | --- | --- |
-| `--name <cluster>` / `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster to watch (watcher modes only). |
-| `--delay <seconds>` / `MEDIK8S_REBOOT_DELAY` | `300` | Maximum seconds to wait for a remediation signal per detected node (watcher modes only). |
-| `--mode <snr\|sbr\|far>` / `MEDIK8S_REBOOT_WATCHER_MODE` | `snr` | `snr`: wait for SelfNodeRemediation CR. `sbr`: wait for SBR FencingSucceeded. `far`: one-shot fence agent via Docker socket. |
-| `--once` | off | Exit after handling the first qualifying node (watcher modes only). |
-| `--action <reboot\|on\|off>` | — | Action to execute (`far` mode only). |
+| `--name <cluster>` / `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster (`snr`, `sbr`, `mdr`). |
+| `--delay <seconds>` / `MEDIK8S_REBOOT_DELAY` | `300` | Maximum remediation-signal wait per Node (`snr`, `sbr` only). |
+| `--mode <snr\|sbr\|far\|mdr>` / `MEDIK8S_REBOOT_WATCHER_MODE` | `snr` | `snr`: wait for SelfNodeRemediation CR. `sbr`: wait for SBR FencingSucceeded. `far`: fence agent via Docker socket. `mdr`: simulate Machine deletion and fresh-worker replacement. |
+| `--once` | off | Exit after one remediation; required for `mdr`. |
+| `--action <reboot\|on\|off\|status>` | — | Action to execute (`far` mode only). |
 | `--plug <container>` | — | Container name to act on (`far` mode only). |
 | `--unix-socket <path>` | `/var/run/docker.sock` | Docker socket path for the REST API call (`far` mode only). |
 
-The script also uses `KUBECTL` and `CONTAINER_TOOL` if set; otherwise it
-inherits the command selection from [`common.sh`](../dev/common.sh). `--help` prints
-the command usage and exits.
+SNR/SBR select `KUBECTL` and `CONTAINER_TOOL` through
+[`common.sh`](../dev/common.sh). MDR defaults to `kubectl` and `podman` and
+honors those environment overrides directly. `--help` prints usage and exits.
 
 ## What this does and does not simulate
 
@@ -246,8 +258,7 @@ action directly.
 - Actions `reboot`, `on`, `off` map to `/containers/{plug}/restart|start|stop`.
 - `status` uses a separate GET request to `/containers/{plug}/json` and checks
   the `Running` field.
-- Unknown arguments are silently ignored so the FAR controller can pass its
-  standard fence agent parameters without modification.
+- Unknown arguments are rejected before any mode runs.
 
 **Watcher modes** (`snr`, `sbr`; run after `common.sh` is sourced):
 
@@ -262,3 +273,12 @@ action directly.
   handling with `REBOOTING`, and clears that state when `Ready=True`.
 - A background handler waits for the signal or timeout, restarts the
   container, and in SBR mode recreates the null watchdog device.
+
+## MDR Machine replacement
+
+MDR delegates to `kind_mdr.py watch` before `common.sh` is sourced. It discovers
+fixture identities from Kubernetes and the container runtime, acts only on a
+Machine's deletion timestamp, and provisions a new worker after deletion. It
+uses no state directory or test-release gate and reports success or failure
+through its exit status. See [Kind MDR simulation](kind-mdr.md) for setup,
+ordering, and limits.
