@@ -1,7 +1,7 @@
 # MDR Machine lifecycle simulation
 
 `dev/kind_mdr.py` implements a single prepared-spare replacement on a disposable
-Docker Kind cluster. The MDR repository's `hack/kind-e2e.sh` owns cluster setup,
+Podman or Docker Kind cluster. The MDR repository's `hack/kind-e2e.sh` owns cluster setup,
 operator deployment, E2E execution, and teardown. Existing SNR/SBR reboot and FAR
 fence-agent behavior is separate from this mode.
 
@@ -16,7 +16,7 @@ Preparation requires one Ready control plane and three Ready workers. It drains
 and stops the last worker by sorted name, removes its Node, installs the vendored
 Machine/MachineSet CRDs, and creates two linked Machines in `kind-mdr-machines`.
 It records Node, Machine, owner, and container identities in `fixture.json`.
-Use `KUBECONFIG` for the named Kind cluster and `CONTAINER_TOOL=docker`.
+Use `KUBECONFIG` for the named Kind cluster and `CONTAINER_TOOL=podman`.
 
 Start the watcher through the shared entry point:
 
@@ -39,7 +39,7 @@ and exit nonzero. Logs go to stdout/stderr for the caller to capture.
 Deletion-request timeout is five minutes; replacement release and readiness share
 a fifteen-minute deadline. No timeout triggers forced recovery. Use a fresh cluster and
 state directory after failure or success; restart recovery and additional spares
-are outside this simulator's scope. Python 3, Docker, and kubectl are required.
+are outside this simulator's scope. Python 3, Podman or Docker, and kubectl are required.
 `KUBECTL` and `CONTAINER_TOOL` can select the executable paths.
 
 This is a test double for Machine controllers, not a cloud provider. It never

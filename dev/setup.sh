@@ -356,7 +356,7 @@ PYEOF
                 -p "127.0.0.1:${REG_PORT}:5000" \
                 --network bridge \
                 --name "${REG_NAME}" \
-                registry:2
+                docker.io/library/registry:2
             echo "  Registry container '${REG_NAME}' started on port ${REG_PORT}."
         fi
 

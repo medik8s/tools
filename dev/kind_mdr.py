@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-replacement Machine API simulator for disposable Docker Kind clusters."""
+"""One-replacement Machine API simulator for disposable Podman or Docker Kind clusters."""
 import argparse
 import json
 import os
@@ -29,8 +29,8 @@ def kube(*args, data=None):
     return run(os.environ.get("KUBECTL", "kubectl"), "--request-timeout=30s", *args, data=data)
 
 
-def docker(*args):
-    return run(os.environ.get("CONTAINER_TOOL", "docker"), *args)
+def container(*args):
+    return run(os.environ.get("CONTAINER_TOOL", "podman"), *args)
 
 
 def get(resource, name, namespace=None):
@@ -76,7 +76,7 @@ def ready(node):
 
 
 def inspect_worker(name, cluster, container_id=None):
-    info = json.loads(docker("inspect", name))[0]
+    info = json.loads(container("inspect", name))[0]
     labels = info["Config"].get("Labels", {})
     if labels.get("io.x-k8s.kind.cluster") != cluster or labels.get("io.x-k8s.kind.role") != "worker":
         raise RuntimeError(f"Refusing non-worker or foreign container: {name}")
@@ -126,7 +126,7 @@ def prepare(cluster, state, crd_dir):
         entries.append({"name": name, "uid": node["metadata"]["uid"], "container_id": info["Id"]})
     spare = entries.pop()
     kube("drain", spare["name"], "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=90s")
-    docker("stop", spare["container_id"])
+    container("stop", spare["container_id"])
     delete_node(spare["name"], spare["uid"])
     for resource in ("machines", "machinesets"):
         filename = crd_dir / f"0000_10_machine-api_01_{resource}-Default.crd.yaml"
@@ -172,9 +172,9 @@ def remove_machine(entry, machine, fixture):
     node = get("node", entry["name"])
     if not node or node["metadata"]["uid"] != entry["uid"]:
         raise RuntimeError("Original Node identity changed")
-    docker("rm", "--force", info["Id"])
+    container("rm", "--force", info["Id"])
     # Query the daemon successfully; an inspect error alone would also hide daemon failures.
-    if docker("ps", "-aq", "--no-trunc", "--filter", f"id={info['Id']}").strip():
+    if container("ps", "-aq", "--no-trunc", "--filter", f"id={info['Id']}").strip():
         raise RuntimeError("Victim container still exists")
     delete_node(entry["name"], entry["uid"])
     metadata = machine["metadata"]
@@ -190,7 +190,7 @@ def cni_ready(name):
     node = get("node", name)
     if not ready(node) or not node.get("spec", {}).get("podCIDR"):
         return False
-    config = json.loads(docker("exec", name, "cat", "/etc/cni/net.d/10-kindnet.conflist"))
+    config = json.loads(container("exec", name, "cat", "/etc/cni/net.d/10-kindnet.conflist"))
     subnets = [r["subnet"] for p in config["plugins"]
                for ranges in p.get("ipam", {}).get("ranges", []) for r in ranges]
     return node if node["spec"]["podCIDR"] in subnets else False
@@ -234,7 +234,7 @@ def watch(cluster, state):
     replacement_name = spare["name"] + "-replacement"
     create(machine_object(replacement_name, cluster, fixture["owner_uid"]))
     inspect_worker(spare["name"], cluster, spare["container_id"])
-    docker("start", spare["container_id"])
+    container("start", spare["container_id"])
     replacement = wait_for("replacement Ready and CNI subnet convergence", lambda: cni_ready(spare["name"]),
                            min(300, replacement_deadline - time.monotonic()))
     if replacement["metadata"]["uid"] == spare["uid"]:
@@ -254,8 +254,7 @@ def main():
     args = parser.parse_args()
     args.state_dir.mkdir(parents=True, exist_ok=True)
     try:
-        if json.loads(docker("version", "--format", "{{json .Server}}"))["Platform"]["Name"].lower().find("podman") >= 0:
-            raise RuntimeError("MDR Kind simulation supports Docker only")
+        container("info")
         if kube("config", "current-context").strip() != f"kind-{args.name}":
             raise RuntimeError("Use the named Kind cluster's isolated kubeconfig")
         if args.action == "prepare":
