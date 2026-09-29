@@ -1,0 +1,90 @@
+name: Kind HA Cluster & Etcd Guard CI (docker)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-ha-e2e:
+    name: Kind HA Setup & Etcd Guard Verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: ha-ci
+      CONTAINER_TOOL: docker
+      KIND_HA: "true"
+      KUBECONFIG: ${{ github.workspace }}/.kube/config
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install operator-sdk
+        run: |
+          make operator-sdk
+          sudo cp ./bin/operator-sdk /usr/local/bin/
+
+      - name: Create HA Kind cluster with etcd guard mock
+        run: make dev-setup
+
+      - name: Verify HA nodes & topology
+        run: |
+          echo "=== Nodes Snapshot ==="
+          kubectl get nodes -o wide
+
+          CP_COUNT=$(kubectl get nodes -l node-role.kubernetes.io/control-plane --no-headers | wc -l | tr -d ' ')
+          WORKER_COUNT=$(kubectl get nodes -l node-role.kubernetes.io/worker --no-headers | wc -l | tr -d ' ')
+
+          echo "Control-plane nodes: ${CP_COUNT}, Worker nodes: ${WORKER_COUNT}"
+
+          if [ "${CP_COUNT}" -lt 3 ]; then
+            echo "❌ ERROR: Expected at least 3 control-plane nodes for HA cluster, found ${CP_COUNT}"
+            exit 1
+          fi
+
+      - name: Verify openshift-etcd guard Deployment & PDB
+        run: |
+          echo "=== Verifying openshift-etcd namespace ==="
+          kubectl get ns openshift-etcd
+
+          echo "=== Waiting for etcd-guard Deployment rollout ==="
+          kubectl rollout status deployment/etcd-guard -n openshift-etcd --timeout=120s
+
+          echo "=== Checking etcd-guard-pdb ==="
+          kubectl get pdb/etcd-guard-pdb -n openshift-etcd -o wide
+
+          EXPECTED_CP=$(kubectl get nodes -l node-role.kubernetes.io/control-plane --no-headers | wc -l | tr -d ' ')
+          RAW_READY=$(kubectl get deployment/etcd-guard -n openshift-etcd -o jsonpath='{.status.readyReplicas}')
+          READY_PODS=${RAW_READY:-0}
+
+          echo "Expected pods (control-planes): ${EXPECTED_CP}, Ready pods: ${READY_PODS}"
+
+          if [ "${EXPECTED_CP}" -eq "${READY_PODS}" ] && [ "${EXPECTED_CP}" -ge 3 ]; then
+            echo "✅ SUCCESS: etcd-guard Deployment and PDB verified on all control-plane nodes!"
+          else
+            echo "❌ ERROR: etcd-guard pod count (${READY_PODS}) does not match control-plane node count (${EXPECTED_CP})!"
+            exit 1
+          fi
+
+      - name: Debug on failure
+        if: ${{ failure() }}
+        run: |
+          echo "=== Deployment Details ==="
+          kubectl describe deployment/etcd-guard -n openshift-etcd 2>/dev/null || true
+          echo ""
+          echo "=== Pod Details ==="
+          kubectl get pods -n openshift-etcd -o wide 2>/dev/null || true
+          echo ""
+          make dev-ci-debug
+
+      - name: Teardown Kind cluster
+        if: ${{ always() }}
+        run: make dev-teardown
