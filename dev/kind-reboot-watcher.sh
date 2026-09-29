@@ -27,7 +27,7 @@
 #                   the script run inside the FAR operator pod where only curl
 #                   is available.
 #   mdr           — simulates one Machine deletion and fresh-worker replacement.
-#                   Requires --once and --state-dir from the MDR Kind E2E runner.
+#                   Requires --once and a prepared Machine fixture.
 #
 # A configurable timeout (--delay) acts as a safety fallback: if the expected
 # signal does not appear within that time, the container is restarted anyway to
@@ -54,7 +54,6 @@ SOCKET="/var/run/docker.sock"
 CR_POLL_INTERVAL=5
 POLL_INTERVAL=5
 ONCE=false
-STATE_DIR=""
 
 usage() {
     echo "Usage: $0 [--name <cluster>] [--delay <seconds>] [--once] [--mode snr|sbr|far|mdr]"
@@ -67,7 +66,6 @@ usage() {
     echo "  --delay <seconds>      Max wait for remediation signal before forced reboot (default: 300)"
     echo "  --once                 Exit after first reboot (for CI)"
     echo "  --mode snr|sbr|far|mdr Remediation mode (default: snr)"
-    echo "  --state-dir <path>     Prepared fixture directory (mdr requires --once)"
     echo "  --action reboot|on|off|status Action for --mode far"
     echo "  --plug <container>     Container name for --mode far"
     echo "  --unix-socket <path>   Docker socket path for --mode far (default: /var/run/docker.sock)"
@@ -83,7 +81,6 @@ while [[ $# -gt 0 ]]; do
         --name) CLUSTER_NAME="$2"; shift 2 ;;
         --delay) REBOOT_DELAY="$2"; shift 2 ;;
         --once) ONCE=true; shift ;;
-        --state-dir) STATE_DIR="$2"; shift 2 ;;
         --mode=*) MODE="${1#*=}"; shift ;;
         --mode) MODE="$2"; shift 2 ;;
         --action=*) ACTION="${1#*=}"; shift ;;
@@ -159,8 +156,8 @@ if [[ "$MODE" == "far" ]]; then
 fi
 
 if [[ "$MODE" == "mdr" ]]; then
-    [[ "$ONCE" == true && -n "$STATE_DIR" ]] || { echo "Error: mdr requires --once and --state-dir"; exit 1; }
-    exec python3 "${SCRIPT_DIR}/kind_mdr.py" watch --name "$CLUSTER_NAME" --state-dir "$STATE_DIR"
+    [[ "$ONCE" == true ]] || { echo "Error: mdr requires --once"; exit 1; }
+    exec python3 "${SCRIPT_DIR}/kind_mdr.py" watch --name "$CLUSTER_NAME"
 fi
 
 if [[ "$MODE" != "snr" && "$MODE" != "sbr" ]]; then

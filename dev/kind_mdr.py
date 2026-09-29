@@ -55,12 +55,6 @@ def patch(resource, name, value, namespace=None, status=False):
     kube(*args)
 
 
-def save(path, value):
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2) + "\n")
-    temporary.replace(path)
-
-
 def wait_for(message, predicate, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -111,20 +105,18 @@ def link_node(node, machine):
                                      "labels": {WORKER: ""}}})
 
 
-def prepare(cluster, state, crd_dir):
-    if (state / "fixture.json").exists() or get("namespace", NS):
-        raise RuntimeError("MDR fixture already exists; use a fresh cluster and state directory")
+def prepare(cluster, crd_dir):
+    if get("namespace", NS):
+        raise RuntimeError("MDR fixture already exists; use a fresh cluster")
     nodes = json.loads(kube("get", "nodes", "-o", "json"))["items"]
     workers = sorted((n for n in nodes if "node-role.kubernetes.io/control-plane" not in n["metadata"].get("labels", {})),
                      key=lambda n: n["metadata"]["name"])
     control_planes = [n for n in nodes if n not in workers]
-    if len(workers) != 2 or len(control_planes) != 1 or not all(ready(n) for n in nodes):
-        raise RuntimeError("Expected one Ready control plane and two Ready workers")
-    entries = []
+    if len(workers) < 2 or len(control_planes) != 1 or not all(ready(n) for n in nodes):
+        raise RuntimeError("Expected one Ready control plane and at least two Ready workers")
     for node in workers:
         name = node["metadata"]["name"]
-        info = inspect_worker(name, cluster)
-        entries.append({"name": name, "uid": node["metadata"]["uid"], "container_id": info["Id"]})
+        inspect_worker(name, cluster)
     for resource in ("machines", "machinesets"):
         filename = crd_dir / f"0000_10_machine-api_01_{resource}-Default.crd.yaml"
         kube("apply", "-f", str(filename))
@@ -132,20 +124,47 @@ def prepare(cluster, state, crd_dir):
     create({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NS}})
     owner = create({"apiVersion": "machine.openshift.io/v1beta1", "kind": "MachineSet",
                     "metadata": {"name": OWNER, "namespace": NS},
-                    "spec": {"replicas": 2, "selector": {"matchLabels": {LABEL: cluster}},
+                    "spec": {"replicas": len(workers), "selector": {"matchLabels": {LABEL: cluster}},
                              "template": {"metadata": {"labels": {LABEL: cluster}},
                                           "spec": {"providerSpec": {"value": {}}}}}})
     owner_uid = owner["metadata"]["uid"]
-    for entry in entries:
-        machine = create(machine_object(entry["name"], cluster, owner_uid))
-        entry["machine_uid"] = machine["metadata"]["uid"]
-        link_node(get("node", entry["name"]), entry["name"])
-    fixture = {"cluster": cluster, "namespace": NS, "owner_uid": owner_uid,
-               "control_plane": {"name": control_planes[0]["metadata"]["name"],
-                                 "uid": control_planes[0]["metadata"]["uid"]},
-               "workers": entries}
-    save(state / "fixture.json", fixture)
-    print("Prepared two active workers; replacement will be provisioned after deletion", flush=True)
+    for node in workers:
+        name = node["metadata"]["name"]
+        create(machine_object(name, cluster, owner_uid))
+        link_node(node, name)
+    print(f"Prepared {len(workers)} active workers; replacement will be provisioned after deletion", flush=True)
+
+
+def discover(cluster):
+    owner = get("machinesets.machine.openshift.io", OWNER, NS)
+    if not owner or owner["spec"]["replicas"] < 2:
+        raise RuntimeError("Expected the prepared MachineSet with at least two replicas")
+    control_planes = json.loads(kube("get", "nodes", "-l", "node-role.kubernetes.io/control-plane", "-o", "json"))["items"]
+    if len(control_planes) != 1:
+        raise RuntimeError("Expected one control plane")
+    cp = control_planes[0]["metadata"]["name"]
+    labels = json.loads(container("inspect", cp))[0]["Config"]["Labels"]
+    if labels.get("io.x-k8s.kind.cluster") != cluster or labels.get("io.x-k8s.kind.role") != "control-plane":
+        raise RuntimeError("Kubeconfig does not match the named Kind cluster")
+    machines = json.loads(kube("get", MACHINES, "-n", NS, "-l", f"{LABEL}={cluster}", "-o", "json"))["items"]
+    if len(machines) != owner["spec"]["replicas"]:
+        raise RuntimeError("Fixture Machine count must match MachineSet replicas")
+    workers = []
+    for machine in machines:
+        name = machine["metadata"]["name"]
+        ref = machine.get("status", {}).get("nodeRef", {})
+        node = get("node", name)
+        if (ref.get("name") != name or not ready(node) or ref.get("uid") != node["metadata"]["uid"]
+                or node["metadata"].get("annotations", {}).get(ANNOTATION) != f"{NS}/{name}"):
+            raise RuntimeError(f"Fixture Machine {name} must reference its Ready worker")
+        info = inspect_worker(name, cluster)
+        workers.append({"name": name, "uid": ref["uid"], "container_id": info["Id"],
+                        "machine_uid": machine["metadata"]["uid"]})
+    fixture = {"cluster": cluster, "owner_uid": owner["metadata"]["uid"],
+               "control_plane": {"name": cp}, "workers": workers}
+    pending_machine(fixture)
+    print("Discovered fixture: " + json.dumps(fixture), flush=True)
+    return fixture
 
 
 def pending_machine(fixture):
@@ -183,7 +202,7 @@ def remove_machine(entry, machine, fixture):
     wait_for("Machine deletion", lambda: get(MACHINES, entry["name"], NS) is None, 60)
 
 
-def provision_worker(fixture, entry, state):
+def provision_worker(fixture, entry):
     cluster = fixture["cluster"]
     name = entry["name"] + "-replacement"
     source = next(worker for worker in fixture["workers"] if worker != entry)
@@ -203,18 +222,22 @@ def provision_worker(fixture, entry, state):
         if env.split("=", 1)[0].lower() in ("http_proxy", "https_proxy", "no_proxy", "kind_experimental_containerd_snapshotter"):
             args += ["--env", env]
     container_id = container(*args, template["Config"]["Image"]).strip()
-    save(state / "replacement.json", {"name": name, "container_id": container_id})
+    print(f"Created replacement container {name}: {container_id}", flush=True)
     wait_for("replacement container boot", lambda: "Reached target" in container("logs", name), 60)
     info = inspect_worker(name, cluster, container_id)
     address = info["NetworkSettings"]["Networks"]["kind"]["IPAddress"]
     config = container("exec", source["name"], "cat", "/etc/containerd/config.toml")
     container("exec", "-i", name, "tee", "/etc/containerd/config.toml", data=config)
-    registry = os.environ.get("MEDIK8S_REGISTRY_NAME", "mdr-kind-registry")
-    port = os.environ.get("MEDIK8S_REGISTRY_PORT", "5001")
-    directory = f"/etc/containerd/certs.d/localhost:{port}"
+    registry = os.environ.get("MEDIK8S_REGISTRY_NAME", "kind-registry")
+    port = os.environ.get("MEDIK8S_REGISTRY_PORT", "5000")
+    directory = f"/etc/containerd/certs.d/{registry}:{port}"
+    registry_config = container("exec", source["name"], "cat", directory + "/hosts.toml")
     container("exec", name, "mkdir", "-p", directory)
-    container("exec", "-i", name, "tee", directory + "/hosts.toml",
-              data=f'[host."http://{registry}:5000"]\n  capabilities = ["pull", "resolve"]\n')
+    container("exec", "-i", name, "tee", directory + "/hosts.toml", data=registry_config)
+    registry_ip = container("exec", source["name"], "getent", "hosts", registry).split()[0]
+    hosts = container("exec", name, "cat", "/etc/hosts")
+    hosts = "\n".join(line for line in hosts.splitlines() if registry not in line.split()[1:])
+    container("exec", "-i", name, "tee", "/etc/hosts", data=f"{hosts}\n{registry_ip} {registry}\n")
     container("exec", name, "systemctl", "restart", "containerd")
     cp = fixture["control_plane"]["name"]
     join = shlex.split(container("exec", cp, "kubeadm", "token", "create", "--ttl=20m", "--print-join-command"))
@@ -230,7 +253,7 @@ def provision_worker(fixture, entry, state):
     container("exec", "-i", name, "tee", "/kind/kubeadm.conf", data=json.dumps(config))
     try:
         output = container("exec", name, "kubeadm", "join", "--config=/kind/kubeadm.conf")
-        (state / "join.log").write_text(output)
+        print(output, flush=True)
     finally:
         container("exec", cp, "kubeadm", "token", "delete", config["discovery"]["bootstrapToken"]["token"].split(".")[0])
 
@@ -263,34 +286,20 @@ def verify_network(name, timeout):
     wait_for("replacement pod networking", succeeded, timeout)
 
 
-def watch(cluster, state):
-    fixture = json.loads((state / "fixture.json").read_text())
-    if fixture["cluster"] != cluster or (state / "ready").exists():
-        raise RuntimeError("Wrong cluster or reused watcher state; start a fresh run")
-    cp = get("node", fixture["control_plane"]["name"])
-    if not cp or cp["metadata"]["uid"] != fixture["control_plane"]["uid"]:
-        raise RuntimeError("Kubeconfig does not match the prepared cluster")
-    for worker in fixture["workers"]:
-        inspect_worker(worker["name"], cluster, worker["container_id"])
-        node = get("node", worker["name"])
-        if not ready(node) or node["metadata"]["uid"] != worker["uid"]:
-            raise RuntimeError("Prepared worker identity or readiness changed")
-    pending_machine(fixture)
-    save(state / "ready", {"cluster": cluster})
+def watch(cluster):
+    fixture = discover(cluster)
     entry, machine = wait_for("Machine deletion request", lambda: pending_machine(fixture), 300)
     print(f"Deleting {entry['name']} for Machine UID {entry['machine_uid']}", flush=True)
     remove_machine(entry, machine, fixture)
-    save(state / "deleted.json", entry)
     replacement_deadline = time.monotonic() + 900
     replacement_name = entry["name"] + "-replacement"
     create(machine_object(replacement_name, cluster, fixture["owner_uid"]))
     print(f"Provisioning fresh worker {replacement_name}", flush=True)
-    provision_worker(fixture, entry, state)
+    provision_worker(fixture, entry)
     replacement = wait_for("replacement Ready and CNI subnet convergence", lambda: cni_ready(replacement_name),
                            replacement_deadline - time.monotonic())
     verify_network(replacement_name, min(180, replacement_deadline - time.monotonic()))
     link_node(replacement, replacement_name)
-    save(state / "complete.json", {"deleted": entry, "replacement": replacement_name, "machine": replacement_name})
     print("Replacement network verified and worker published", flush=True)
 
 
@@ -298,10 +307,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "watch"])
     parser.add_argument("--name", required=True)
-    parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--crd-dir", type=Path)
     args = parser.parse_args()
-    args.state_dir.mkdir(parents=True, exist_ok=True)
     try:
         container("info")
         if kube("config", "current-context").strip() != f"kind-{args.name}":
@@ -309,11 +316,10 @@ def main():
         if args.action == "prepare":
             if not args.crd_dir:
                 raise RuntimeError("prepare requires --crd-dir")
-            prepare(args.name, args.state_dir, args.crd_dir)
+            prepare(args.name, args.crd_dir)
         else:
-            watch(args.name, args.state_dir)
+            watch(args.name)
     except (RuntimeError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
-        save(args.state_dir / "error.json", {"error": str(error)})
         print(f"MDR simulator failed: {error}", file=sys.stderr, flush=True)
         return 1
     return 0
