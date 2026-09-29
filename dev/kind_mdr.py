@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -29,8 +30,8 @@ def kube(*args, data=None):
     return run(os.environ.get("KUBECTL", "kubectl"), "--request-timeout=30s", *args, data=data)
 
 
-def container(*args):
-    return run(os.environ.get("CONTAINER_TOOL", "podman"), *args)
+def container(*args, data=None):
+    return run(os.environ.get("CONTAINER_TOOL", "podman"), *args, data=data)
 
 
 def get(resource, name, namespace=None):
@@ -117,17 +118,13 @@ def prepare(cluster, state, crd_dir):
     workers = sorted((n for n in nodes if "node-role.kubernetes.io/control-plane" not in n["metadata"].get("labels", {})),
                      key=lambda n: n["metadata"]["name"])
     control_planes = [n for n in nodes if n not in workers]
-    if len(workers) != 3 or len(control_planes) != 1 or not all(ready(n) for n in nodes):
-        raise RuntimeError("Expected one Ready control plane and three Ready workers")
+    if len(workers) != 2 or len(control_planes) != 1 or not all(ready(n) for n in nodes):
+        raise RuntimeError("Expected one Ready control plane and two Ready workers")
     entries = []
     for node in workers:
         name = node["metadata"]["name"]
         info = inspect_worker(name, cluster)
         entries.append({"name": name, "uid": node["metadata"]["uid"], "container_id": info["Id"]})
-    spare = entries.pop()
-    kube("drain", spare["name"], "--ignore-daemonsets", "--delete-emptydir-data", "--timeout=90s")
-    container("stop", spare["container_id"])
-    delete_node(spare["name"], spare["uid"])
     for resource in ("machines", "machinesets"):
         filename = crd_dir / f"0000_10_machine-api_01_{resource}-Default.crd.yaml"
         kube("apply", "-f", str(filename))
@@ -146,9 +143,9 @@ def prepare(cluster, state, crd_dir):
     fixture = {"cluster": cluster, "namespace": NS, "owner_uid": owner_uid,
                "control_plane": {"name": control_planes[0]["metadata"]["name"],
                                  "uid": control_planes[0]["metadata"]["uid"]},
-               "workers": entries, "spare": spare}
+               "workers": entries}
     save(state / "fixture.json", fixture)
-    print("Prepared two active workers and one stopped spare", flush=True)
+    print("Prepared two active workers; replacement will be provisioned after deletion", flush=True)
 
 
 def pending_machine(fixture):
@@ -172,7 +169,7 @@ def remove_machine(entry, machine, fixture):
     node = get("node", entry["name"])
     if not node or node["metadata"]["uid"] != entry["uid"]:
         raise RuntimeError("Original Node identity changed")
-    container("rm", "--force", info["Id"])
+    container("rm", "--force", "--volumes", info["Id"])
     # Query the daemon successfully; an inspect error alone would also hide daemon failures.
     if container("ps", "-aq", "--no-trunc", "--filter", f"id={info['Id']}").strip():
         raise RuntimeError("Victim container still exists")
@@ -186,18 +183,73 @@ def remove_machine(entry, machine, fixture):
     wait_for("Machine deletion", lambda: get(MACHINES, entry["name"], NS) is None, 60)
 
 
+def provision_worker(fixture, entry, state):
+    cluster = fixture["cluster"]
+    name = entry["name"] + "-replacement"
+    source = next(worker for worker in fixture["workers"] if worker != entry)
+    template = inspect_worker(source["name"], cluster, source["container_id"])
+    provider = os.environ.get("KIND_EXPERIMENTAL_PROVIDER", Path(os.environ.get("CONTAINER_TOOL", "podman")).name)
+    args = ["run", "--detach", "--tty", "--name", name, "--hostname", name,
+            "--label", f"io.x-k8s.kind.cluster={cluster}", "--label", "io.x-k8s.kind.role=worker",
+            "--privileged", "--network", "kind", "--cgroupns=private",
+            "--tmpfs", "/tmp", "--tmpfs", "/run", "--volume", "/var",
+            "--volume", "/lib/modules:/lib/modules:ro"]
+    if provider == "podman":
+        args += ["--env", "container=podman"]
+    for mount in template.get("Mounts", []):
+        if mount["Destination"] == "/dev/mapper":
+            args += ["--volume", "/dev/mapper:/dev/mapper"]
+    for env in template["Config"].get("Env", []):
+        if env.split("=", 1)[0].lower() in ("http_proxy", "https_proxy", "no_proxy", "kind_experimental_containerd_snapshotter"):
+            args += ["--env", env]
+    container_id = container(*args, template["Config"]["Image"]).strip()
+    save(state / "replacement.json", {"name": name, "container_id": container_id})
+    wait_for("replacement container boot", lambda: "Reached target" in container("logs", name), 60)
+    info = inspect_worker(name, cluster, container_id)
+    address = info["NetworkSettings"]["Networks"]["kind"]["IPAddress"]
+    config = container("exec", source["name"], "cat", "/etc/containerd/config.toml")
+    container("exec", "-i", name, "tee", "/etc/containerd/config.toml", data=config)
+    registry = os.environ.get("MEDIK8S_REGISTRY_NAME", "mdr-kind-registry")
+    port = os.environ.get("MEDIK8S_REGISTRY_PORT", "5001")
+    directory = f"/etc/containerd/certs.d/localhost:{port}"
+    container("exec", name, "mkdir", "-p", directory)
+    container("exec", "-i", name, "tee", directory + "/hosts.toml",
+              data=f'[host."http://{registry}:5000"]\n  capabilities = ["pull", "resolve"]\n')
+    container("exec", name, "systemctl", "restart", "containerd")
+    cp = fixture["control_plane"]["name"]
+    join = shlex.split(container("exec", cp, "kubeadm", "token", "create", "--ttl=20m", "--print-join-command"))
+    config = {"apiVersion": "kubeadm.k8s.io/v1beta4", "kind": "JoinConfiguration",
+              "discovery": {"bootstrapToken": {
+                  "apiServerEndpoint": join[2], "token": join[join.index("--token") + 1],
+                  "caCertHashes": [join[join.index("--discovery-token-ca-cert-hash") + 1]]}},
+              "nodeRegistration": {"name": name, "criSocket": "unix:///run/containerd/containerd.sock",
+                                   "kubeletExtraArgs": [{"name": "node-ip", "value": address},
+                                                        {"name": "provider-id", "value": f"kind://{provider}/{cluster}/{name}"}]},
+              "skipPhases": ["preflight"]}
+    # Match Kind's kubeadm join: its container nodes cannot pass bare-host preflight checks.
+    container("exec", "-i", name, "tee", "/kind/kubeadm.conf", data=json.dumps(config))
+    try:
+        output = container("exec", name, "kubeadm", "join", "--config=/kind/kubeadm.conf")
+        (state / "join.log").write_text(output)
+    finally:
+        container("exec", cp, "kubeadm", "token", "delete", config["discovery"]["bootstrapToken"]["token"].split(".")[0])
+
+
 def cni_ready(name):
     node = get("node", name)
     if not ready(node) or not node.get("spec", {}).get("podCIDR"):
         return False
-    config = json.loads(container("exec", name, "cat", "/etc/cni/net.d/10-kindnet.conflist"))
+    value = container("exec", name, "sh", "-c", "cat /etc/cni/net.d/10-kindnet.conflist 2>/dev/null || true")
+    if not value.strip():
+        return False
+    config = json.loads(value)
     subnets = [r["subnet"] for p in config["plugins"]
                for ranges in p.get("ipam", {}).get("ranges", []) for r in ranges]
     return node if node["spec"]["podCIDR"] in subnets else False
 
 
 def verify_network(name, timeout):
-    # Node Ready can precede kindnet and kube-proxy convergence after Node recreation.
+    # Node Ready can precede kindnet and kube-proxy convergence.
     command = "nslookup kubernetes.default.svc.cluster.local && wget -S -O /dev/null --no-check-certificate https://kubernetes.default.svc 2>&1 | grep -E 'HTTP/.* (200|401|403)'"
     create({"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "replacement-network", "namespace": NS},
             "spec": {"nodeName": name, "restartPolicy": "Never", "containers": [{
@@ -218,10 +270,11 @@ def watch(cluster, state):
     cp = get("node", fixture["control_plane"]["name"])
     if not cp or cp["metadata"]["uid"] != fixture["control_plane"]["uid"]:
         raise RuntimeError("Kubeconfig does not match the prepared cluster")
-    spare = fixture["spare"]
-    info = inspect_worker(spare["name"], cluster, spare["container_id"])
-    if info["State"]["Running"] or get("node", spare["name"]):
-        raise RuntimeError("Spare must be stopped and absent from Kubernetes")
+    for worker in fixture["workers"]:
+        inspect_worker(worker["name"], cluster, worker["container_id"])
+        node = get("node", worker["name"])
+        if not ready(node) or node["metadata"]["uid"] != worker["uid"]:
+            raise RuntimeError("Prepared worker identity or readiness changed")
     pending_machine(fixture)
     save(state / "ready", {"cluster": cluster})
     entry, machine = wait_for("Machine deletion request", lambda: pending_machine(fixture), 300)
@@ -229,19 +282,15 @@ def watch(cluster, state):
     remove_machine(entry, machine, fixture)
     save(state / "deleted.json", entry)
     replacement_deadline = time.monotonic() + 900
-    gate = state / f"replace-{entry['machine_uid']}"
-    wait_for("test replacement release", gate.exists, replacement_deadline - time.monotonic())
-    replacement_name = spare["name"] + "-replacement"
+    replacement_name = entry["name"] + "-replacement"
     create(machine_object(replacement_name, cluster, fixture["owner_uid"]))
-    inspect_worker(spare["name"], cluster, spare["container_id"])
-    container("start", spare["container_id"])
-    replacement = wait_for("replacement Ready and CNI subnet convergence", lambda: cni_ready(spare["name"]),
-                           min(300, replacement_deadline - time.monotonic()))
-    if replacement["metadata"]["uid"] == spare["uid"]:
-        raise RuntimeError("Spare did not register a new Node")
-    verify_network(spare["name"], min(180, replacement_deadline - time.monotonic()))
+    print(f"Provisioning fresh worker {replacement_name}", flush=True)
+    provision_worker(fixture, entry, state)
+    replacement = wait_for("replacement Ready and CNI subnet convergence", lambda: cni_ready(replacement_name),
+                           replacement_deadline - time.monotonic())
+    verify_network(replacement_name, min(180, replacement_deadline - time.monotonic()))
     link_node(replacement, replacement_name)
-    save(state / "complete.json", {"deleted": entry, "replacement": spare["name"], "machine": replacement_name})
+    save(state / "complete.json", {"deleted": entry, "replacement": replacement_name, "machine": replacement_name})
     print("Replacement network verified and worker published", flush=True)
 
 

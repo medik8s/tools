@@ -5,7 +5,7 @@ container act like a machine that reboots after remediation. It is a helper for
 development and end-to-end tests that need to exercise what happens after a
 node is fenced or told to reboot.
 
-The script has two distinct personalities depending on `--mode`:
+The script supports these modes:
 
 - **Watcher modes** (`snr`, `sbr`): long-running daemon that watches all
   worker nodes and restarts their containers when they remain NotReady and the
@@ -14,6 +14,8 @@ The script has two distinct personalities depending on `--mode`:
   for FenceAgentsRemediation (FAR) on Kind. Receives standard fence agent
   arguments (`--action`, `--plug`) and calls the Docker REST API directly
   via the Unix socket, then exits.
+- **MDR mode** (`mdr`): replaces a deleted fixture Machine with a fresh Kind
+  worker. Requires `--once` and `--state-dir`; see [MDR setup](kind-mdr.md).
 
 Kind nodes are containers sharing the host kernel. A reboot request from an
 operator cannot reboot an individual Kind node the way it would reboot a real

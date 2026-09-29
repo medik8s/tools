@@ -23,7 +23,7 @@ REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
 REG_PORT="${MEDIK8S_REGISTRY_PORT:-5000}"
 KIND_HA="${KIND_HA:-false}"
 KIND_BLOCK_STORAGE="${KIND_BLOCK_STORAGE:-false}"
-KIND_CONFIG="${SCRIPT_DIR}/kind-config.yaml"
+KIND_CONFIG="${KIND_CONFIG:-${SCRIPT_DIR}/kind-config.yaml}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -80,6 +80,7 @@ while [[ $# -gt 0 ]]; do
   SETUP_DOCKER_SOCKET            Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
+            echo "  KIND_CONFIG               Custom Kind configuration (default: dev/kind-config.yaml)"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
             echo "  KIND_BLOCK_STORAGE        Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
             echo "  KIND_BLOCK_STATE_DIR      Absolute directory for block state and isolated kubeconfig"

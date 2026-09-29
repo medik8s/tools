@@ -26,7 +26,7 @@
 #                   uses curl to speak directly to the Docker socket. This lets
 #                   the script run inside the FAR operator pod where only curl
 #                   is available.
-#   mdr           — simulates one Machine deletion and prepared-spare replacement.
+#   mdr           — simulates one Machine deletion and fresh-worker replacement.
 #                   Requires --once and --state-dir from the MDR Kind E2E runner.
 #
 # A configurable timeout (--delay) acts as a safety fallback: if the expected
