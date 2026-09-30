@@ -101,6 +101,8 @@ export MEDIK8S_CLUSTER_NAME
 export MEDIK8S_NAMESPACE
 export KIND_BLOCK_STORAGE
 export KIND_BLOCK_STATE_DIR
+export SETUP_MDR_MOCK
+export MDR_CRD_DIR
 
 # Helper to find the namespace for this operator's deployment.
 # First tries the kustomization namespace (works even when OPERATOR_NAME != namespace prefix,
@@ -488,11 +490,13 @@ dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sd
 	fi
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" cleanup "$(DEV_OLM_PACKAGE_NAME)" --delete-all >/dev/null 2>&1 || true
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle "$(DEV_OLM_BUNDLE_IMAGE)" \
-		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
+		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)" \
+		$(if $(filter registry,$(DEV_REGISTRY)),--use-http)
 
 dev-olm-upgrade: dev-olm-build-push ## Upgrade an existing operator-sdk bundle installation
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle-upgrade "$(DEV_OLM_BUNDLE_IMAGE)" \
-		--security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)"
+		--security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)" \
+		$(if $(filter registry,$(DEV_REGISTRY)),--use-http)
 
 dev-olm-undeploy: dev-olm-operator-sdk ## Remove an operator-sdk bundle installation
 	@if ! $(KUBECTL) get namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1; then \
@@ -557,7 +561,7 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 				FOUND=true; \
 				echo "  Waiting for $$ns/$$deploy..."; \
 				$(KUBECTL) wait --for=condition=Available deployment/$$deploy -n $$ns --timeout=300s || \
-					echo "  Warning: $$ns/$$deploy is not ready."; \
+					{ echo "  Error: $$ns/$$deploy is not ready." >&2; exit 1; }; \
 			done; \
 		done; \
 	done; \
@@ -570,7 +574,7 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 		for ds in $$($(KUBECTL) get daemonset -n $$ns --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -E 'remediation|maintenance|fence'); do \
 			echo "  Waiting for $$ns/$$ds..."; \
 			$(KUBECTL) rollout status daemonset/$$ds -n $$ns --timeout=300s || \
-				echo "  Warning: $$ns/$$ds is not ready."; \
+				{ echo "  Error: $$ns/$$ds is not ready." >&2; exit 1; }; \
 		done; \
 	done
 	@echo "=== Waiting for webhook endpoints to be ready ==="
@@ -586,7 +590,8 @@ dev-wait: ## Wait for all medik8s operator pods to be ready
 				sleep 2; \
 			done; \
 			if [ -z "$$ADDRS" ]; then \
-				echo "  Warning: $$ns/$$ep has no ready addresses after 60s."; \
+				echo "  Error: $$ns/$$ep has no ready addresses after 60s." >&2; \
+				exit 1; \
 			fi; \
 		done; \
 	done
@@ -769,6 +774,8 @@ dev-help: ## Show dev environment help
 	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
 	@echo "  KIND_BLOCK_STORAGE=true     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
 	@echo "  KIND_BLOCK_STATE_DIR=/path  Block state and isolated kubeconfig (use same path for teardown)"
+	@echo "  SETUP_MDR_MOCK=true         Install Machine API CRDs and mock worker fixtures for MDR"
+	@echo "  MDR_CRD_DIR=/path           Directory containing Machine and MachineSet CRD manifests"
 	@echo "  SKIP_REGISTRY=true          Skip local registry creation in dev-setup"
 	@echo "  KIND_HA=true                HA config (3 CP + 3 workers)"
 	@echo "  MEDIK8S_CLUSTER_NAME=name   Kind cluster name (default: medik8s-dev)"

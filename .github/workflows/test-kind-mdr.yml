@@ -1,0 +1,72 @@
+name: Machine API Kind CI (docker)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-mdr-smoke:
+    name: Kind Machine API Setup and Replacement Smoke Test (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: mdr-ci
+      CONTAINER_TOOL: docker
+      KIND_EXPERIMENTAL_PROVIDER: docker
+      KUBECONFIG: ${{ github.workspace }}/.kube/config
+      KIND_BLOCK_STORAGE: "false"
+      SKIP_REGISTRY: "false"
+      SETUP_MDR_MOCK: "true"
+      MDR_CRD_DIR: ${{ github.workspace }}/.openshift-api/machine/v1beta1/zz_generated.crd-manifests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Checkout Machine API CRDs
+        uses: actions/checkout@v6
+        with:
+          repository: openshift/api
+          ref: cfb63858e9d74c5239e00b17790840e07c66c0be
+          path: .openshift-api
+          sparse-checkout: machine/v1beta1/zz_generated.crd-manifests
+          persist-credentials: false
+
+      - name: Install operator-sdk
+        run: |
+          make operator-sdk
+          sudo cp ./bin/operator-sdk /usr/local/bin/
+
+      - name: Configure inotify limits
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288
+
+      - name: Validate Machine fixture setup
+        run: python3 dev/tests/test_mdr_setup.py MDRSetup -v
+
+      - name: Create Kind cluster with Machine API fixtures
+        run: make dev-setup
+
+      - name: Verify Machine API fixtures and replace one worker
+        run: python3 dev/tests/test_mdr_setup.py MDRCluster -v
+
+      - name: Debug on failure
+        if: ${{ failure() }}
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl get machines.machine.openshift.io,machinesets.machine.openshift.io -A -o yaml || true
+          kubectl describe pods -n kind-mdr-machines || true
+          kubectl logs -n kind-mdr-machines replacement-network || true
+          make dev-ci-debug
+
+      - name: Teardown Kind cluster
+        if: ${{ always() }}
+        run: make dev-teardown
