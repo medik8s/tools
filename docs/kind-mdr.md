@@ -83,13 +83,13 @@ The existing MDR E2E assertions run unchanged against this lifecycle.
 The watcher needs no state directory or coordination files. It logs the discovered
 identities, new container ID, and kubeadm output to stdout. Exit zero means the
 replacement was published successfully; errors go to stderr and exit nonzero.
-MDR's CI workflow records its logs and checks its exit status alongside
-`E2E_KIND=true make e2e-test`. The local runner performs the same checks while
-running the compiled test binary. The Make target does not start or stop the
-watcher. Other callers must supervise it too, compiling the tests before
-starting the watcher so compilation does not consume the deletion-request timeout.
-Deletion-request timeout is five minutes; replacement has a fifteen-minute
-deadline. No timeout triggers forced recovery. The fixture supports one MDR
+MDR's CI workflow records its logs, runs `E2E_KIND=true make e2e-test`, checks
+its status if it has already exited, and stops it when tests finish. The local
+runner performs the same checks while running the compiled test binary. The
+`e2e-test` target does not start or stop the watcher. Other callers must supervise
+it too: the watcher waits indefinitely for a deletion request, so stop it when
+the tests finish. Replacement retains its fifteen-minute deadline. No timeout
+triggers forced recovery. The fixture supports one MDR
 replacement; resuming a partially completed replacement is not supported.
 Other operators can reuse the cluster before or after this run. Preparation
 rejects an existing fixture namespace; use a fresh cluster for another MDR run.
