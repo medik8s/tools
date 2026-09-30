@@ -253,7 +253,7 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 | Target | Description |
 |--------|-------------|
 | `dev-setup` | Create Kind cluster with all dependencies (`SKIP_KIND=true` for external cluster, `KIND_HA=true` for 3 CP + 3 workers) |
-| `dev-teardown` | Destroy Kind cluster |
+| `dev-teardown` | Destroy Kind cluster and local registry (`KEEP_REGISTRY=true` preserves a shared registry) |
 | `dev-build` | Build operator image and load into Kind (or push to ttl.sh) |
 | `dev-deploy` | Build + install CRDs + deploy + configure cert-manager |
 | `dev-redeploy` | Rebuild and restart (deletes pods to pick up new image) |
@@ -323,6 +323,7 @@ commands to run instead of executing them directly (safety first). Set
 | `MEDIK8S_CLUSTER_NAME` | `medik8s-dev` | Kind cluster name |
 | `MEDIK8S_REGISTRY_NAME` | `kind-registry` | Local registry container name |
 | `MEDIK8S_REGISTRY_PORT` | `5000` | Local registry host port |
+| `KEEP_REGISTRY` | `false` | Preserve the registry container during `dev-teardown`, for example when another cluster shares it |
 | `CONTAINER_TOOL` | auto-detected | `docker` or `podman` |
 | `KUBECTL` | auto-detected | `kubectl` or `oc` |
 | `NHC_UNHEALTHY_DURATION` | `300s` | Unhealthy condition duration for NHC CR |
@@ -336,7 +337,7 @@ commands to run instead of executing them directly (safety first). Set
 | NMO | Full | Cordon, drain, PDB-aware eviction. Pod restarts on startup (missing namespace `list` RBAC — NMO bug, stabilizes after ~4 restarts). |
 | SNR | ~85% | Peer health, softdog watchdog, API check. No hardware watchdog. |
 | FAR | Real fencing on Kind via `fence_kind` (`SETUP_DOCKER_SOCKET=true`) | `fence_kind` power-cycles worker Kind containers over the host Docker socket. Run with `SETUP_DOCKER_SOCKET=true make dev-setup`. `fence_kind` is present only in the e2e image, not the shipped operator image. |
-| MDR | Direct MDR E2E with simulated Machine replacement | Use `SETUP_MDR_MOCK=true make dev-setup` with `MDR_CRD_DIR` set to the Machine API manifests to install the CRDs and prepare fixtures. From MDR, run `make dev-olm-deploy dev-wait`, supervise the one-shot watcher around `E2E_KIND=true make e2e-test`, then use `make dev-olm-undeploy dev-teardown`. The test target only runs Go tests; CI and the local runner own the watcher lifecycle. See [MDR simulation](kind-mdr.md). |
+| MDR | Direct MDR E2E with simulated Machine replacement | Use `SETUP_MDR_MOCK=true make dev-setup` with `MDR_CRD_DIR` set to the Machine API manifests to install the CRDs and prepare fixtures. From MDR, run `make dev-olm-deploy dev-wait`, supervise the one-shot watcher around `E2E_KIND=true make e2e-test`, then use `make dev-teardown`. The test target only runs Go tests; CI and the local runner own the watcher lifecycle. See [MDR simulation](kind-mdr.md). |
 | SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
 
 ## Limitations

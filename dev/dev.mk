@@ -169,10 +169,10 @@ ifeq ($(DEV_REGISTRY),local)
 	KIND_EXPERIMENTAL_PROVIDER=$(if $(filter podman,$(CONTAINER_TOOL)),podman,docker) \
 		kind load image-archive "$$TMPTAR" --name $(MEDIK8S_CLUSTER_NAME)
 else ifeq ($(DEV_REGISTRY),registry)
-	$(CONTAINER_TOOL) build -t $(DEV_IMG) .
+	$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -t $(DEV_IMG) .
 	@# Tag for localhost push (registry is port-forwarded to 127.0.0.1)
 	$(CONTAINER_TOOL) tag $(DEV_IMG) $(DEV_IMG_PUSH)
-	$(CONTAINER_TOOL) push $(DEV_IMG_PUSH)
+	$(CONTAINER_TOOL) push $(if $(filter podman,$(CONTAINER_TOOL)),--tls-verify=false) $(DEV_IMG_PUSH)
 	@echo ""
 	@echo "  Image pushed to local registry: $(DEV_IMG)"
 else
@@ -412,7 +412,7 @@ else
 	@if [ -n "$(DEV_OLM_AGENT_DOCKERFILE)" ]; then \
 		echo "=== Building operand image $(DEV_OLM_AGENT_IMAGE) ==="; \
 		$(CONTAINER_TOOL) build $(DEV_PLATFORM_FLAG) -f "$(DEV_OLM_AGENT_DOCKERFILE)" -t "$(DEV_OLM_AGENT_IMAGE)" .; \
-		$(CONTAINER_TOOL) push "$(DEV_OLM_AGENT_IMAGE)"; \
+		$(CONTAINER_TOOL) push $(if $(filter registry/podman,$(DEV_REGISTRY)/$(CONTAINER_TOOL)),--tls-verify=false) "$(DEV_OLM_AGENT_IMAGE)"; \
 	fi
 	@if [ -n "$(DEV_OLM_EXTRA_BUILD_TARGETS)" ]; then \
 		$(MAKE) $(DEV_OLM_EXTRA_BUILD_TARGETS) \
@@ -435,7 +435,7 @@ else
 		DEFAULT_CHANNEL="$(DEV_OLM_CHANNEL)" \
 		PREVIOUS_VERSION="$(PREVIOUS_VERSION)"
 	"$(DEV_OLM_OPERATOR_SDK)" bundle validate ./bundle --select-optional suite=operatorframework
-	$(CONTAINER_TOOL) push "$(DEV_OLM_BUNDLE_IMAGE)"
+	$(CONTAINER_TOOL) push $(if $(filter registry/podman,$(DEV_REGISTRY)/$(CONTAINER_TOOL)),--tls-verify=false) "$(DEV_OLM_BUNDLE_IMAGE)"
 endif
 
 .PHONY: dev-olm-catalog-build
@@ -777,6 +777,7 @@ dev-help: ## Show dev environment help
 	@echo "  SETUP_MDR_MOCK=true         Install Machine API CRDs and mock worker fixtures for MDR"
 	@echo "  MDR_CRD_DIR=/path           Directory containing Machine and MachineSet CRD manifests"
 	@echo "  SKIP_REGISTRY=true          Skip local registry creation in dev-setup"
+	@echo "  KEEP_REGISTRY=true          Preserve the registry container during dev-teardown"
 	@echo "  KIND_HA=true                HA config (3 CP + 3 workers)"
 	@echo "  MEDIK8S_CLUSTER_NAME=name   Kind cluster name (default: medik8s-dev)"
 	@echo "  MEDIK8S_REGISTRY_NAME=name  Registry container name (default: kind-registry)"
