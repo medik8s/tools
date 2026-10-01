@@ -157,8 +157,9 @@ Restart command error handling differs by mode:
   best-effort commands. It attempts device recreation even if the restart
   command failed.
 
-MDR has separate five-minute deletion-request and fifteen-minute replacement
-deadlines. A timeout fails the run; it never triggers forced recovery.
+MDR waits indefinitely for a Machine deletion request; the caller must stop
+an idle watcher when tests finish. Replacement retains its fifteen-minute
+deadline. A timeout fails the run; it never triggers forced recovery.
 `--delay` does not configure MDR.
 
 ## Start and stop

@@ -78,6 +78,8 @@ while [[ $# -gt 0 ]]; do
   SETUP_NULL_DEVICE_WATCHDOG     Set to 'true' to create a per-node null /dev/watchdog (SBR multi-node e2e)
   SETUP_NFS_RWX                  Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)
   SETUP_DOCKER_SOCKET            Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
+            echo "  SETUP_MDR_MOCK            Set to 'true' to install Machine API CRDs and worker fixtures"
+            echo "  MDR_CRD_DIR               Directory containing the Machine/MachineSet CRD manifests"
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
@@ -91,6 +93,19 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "${SETUP_MDR_MOCK:-false}" = true ]; then
+    if [ "${SKIP_KIND}" = true ] || [ "${KIND_HA}" = true ]; then
+        echo "SETUP_MDR_MOCK requires a Kind cluster with one control plane; --skip-kind and --ha are unsupported." >&2
+        exit 1
+    fi
+    for resource in machines machinesets; do
+        if [ -z "${MDR_CRD_DIR:-}" ] || [ ! -f "${MDR_CRD_DIR}/0000_10_machine-api_01_${resource}-Default.crd.yaml" ]; then
+            echo "SETUP_MDR_MOCK requires MDR_CRD_DIR containing the Machine and MachineSet CRD manifests." >&2
+            exit 1
+        fi
+    done
+fi
 
 if [ "${KIND_HA}" = true ]; then
     KIND_CONFIG="${SCRIPT_DIR}/kind-config-ha.yaml"
@@ -443,6 +458,12 @@ EOF"
         echo "=== Setting up Kind Block Storage ==="
         kind_block_install
     fi 
+
+    if [ "${SETUP_MDR_MOCK:-false}" = true ]; then
+        echo "=== Setting up Machine API fixtures (SETUP_MDR_MOCK=true) ==="
+        CONTAINER_TOOL="${CONTAINER_TOOL}" KUBECTL="${KUBECTL}" \
+            python3 "${SCRIPT_DIR}/kind_mdr.py" prepare --name "${CLUSTER_NAME}" --crd-dir "${MDR_CRD_DIR}"
+    fi
     
     # Optional: verify docker.sock is accessible on the control-plane node.
     # The socket is mounted at cluster-creation time via extraMounts (see above).

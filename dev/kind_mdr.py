@@ -56,8 +56,8 @@ def patch(resource, name, value, namespace=None, status=False):
 
 
 def wait_for(message, predicate, timeout):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    while deadline is None or time.monotonic() < deadline:
         result = predicate()
         if result:
             return result
@@ -288,7 +288,7 @@ def verify_network(name, timeout):
 
 def watch(cluster):
     fixture = discover(cluster)
-    entry, machine = wait_for("Machine deletion request", lambda: pending_machine(fixture), 300)
+    entry, machine = wait_for("Machine deletion request", lambda: pending_machine(fixture), None)
     print(f"Deleting {entry['name']} for Machine UID {entry['machine_uid']}", flush=True)
     remove_machine(entry, machine, fixture)
     replacement_deadline = time.monotonic() + 900

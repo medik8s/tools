@@ -3,6 +3,7 @@
 # Destroys the Kind cluster created by setup.sh
 #
 # Usage: ./teardown.sh [--name <cluster-name>]
+# KEEP_REGISTRY=true preserves a registry shared with other clusters.
 
 set -euo pipefail
 
@@ -74,8 +75,8 @@ if [ "${KIND_BLOCK_STORAGE:-false}" = true ]; then
     kind_block_cleanup
 fi
 
-# Clean up local registry container if it exists (regardless of SKIP_REGISTRY)
-if ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
+# SKIP_REGISTRY controls setup; KEEP_REGISTRY preserves a borrowed registry during teardown.
+if [ "${KEEP_REGISTRY:-false}" != true ] && ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
     echo "=== Removing local registry '${REG_NAME}' ==="
     ${CONTAINER_TOOL} rm -f "${REG_NAME}"
 fi
