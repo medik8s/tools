@@ -54,12 +54,23 @@ case "$tool" in
       'cluster-info '*) exit 1 ;;
       'config current-context') echo "kind-$MEDIK8S_CLUSTER_NAME" ;;
       'get nodes')
-        if [[ "$*" == *'-o name'* ]]; then
+        if [[ "$*" == *'control-plane'* ]]; then
+          printf 'block-test-control-plane\nblock-test-control-plane2\nblock-test-control-plane3\n'
+        elif [[ "$*" == *'-o name'* ]]; then
           printf 'node/block-test-worker\nnode/block-test-worker2\n'
         else
           printf 'block-test-worker\nblock-test-worker2\n'
         fi ;;
       'get node') echo node-role.kubernetes.io/worker ;;
+      'get deployment'*)
+        if [[ "$*" == *'readyReplicas'* ]]; then
+          echo "3"
+        fi ;;
+      'get pdb'*)
+        if [[ "$*" == *'disruptionsAllowed'* ]]; then
+          echo "1"
+        fi ;;
+      'wait '*) : ;;
     esac ;;
   go) : ;;
 esac

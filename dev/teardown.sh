@@ -51,15 +51,19 @@ export KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_TOOL}"
 if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "=== Deleting Kind cluster '${CLUSTER_NAME}' ==="
 
-    # Lazy-unmount any lingering volume mounts inside nodes before deletion
-    # to prevent containers getting stuck in kernel D-state during docker rm
+    # Dynamically unmount all active NFS, CSI, and volume mounts listed in /proc/mounts
+    # before cluster deletion to prevent processes hanging in kernel uninterruptible sleep (D-state).
     NODES=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null || true)
     for node in ${NODES}; do
         ${CONTAINER_TOOL} exec "$node" sh -c \
-            "umount -f -l /var/lib/kubelet/pods/*/volumes/*/* 2>/dev/null || true"
+            "grep -E '/var/lib/kubelet|/mnt' /proc/mounts | awk '{print \$2}' | xargs -r -n1 umount -f -l 2>/dev/null || true" 2>/dev/null || true
     done
 
-    kind delete cluster --name "${CLUSTER_NAME}"
+    # Attempt standard cluster deletion with a fallback forced container removal if Docker/runc hangs
+    kind delete cluster --name "${CLUSTER_NAME}" || {
+        echo "Warning: 'kind delete cluster' encountered an error; forcing container removal..."
+        ${CONTAINER_TOOL} ps -a -q --filter "label=io.x-k8s.kind.cluster=${CLUSTER_NAME}" | xargs -r ${CONTAINER_TOOL} rm -f -v 2>/dev/null || true
+    }
     echo "Done."
 elif ${KUBECTL} cluster-info --context "kind-${CLUSTER_NAME}" >/dev/null 2>&1; then
     echo "Cluster '${CLUSTER_NAME}' exists but is not visible to 'kind get clusters'."
