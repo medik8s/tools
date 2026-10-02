@@ -87,6 +87,68 @@ fs.inotify.max_user_instances=8192
 fs.inotify.max_user_watches=524288
 ```
 
+### Preflight
+
+`make dev-preflight` checks the host without changing anything, and
+`make dev-setup` runs the same checks before it creates anything. Each problem
+is reported with the command that fixes it — and, when the other container
+runtime would avoid the problem entirely, with that alternative:
+
+```
+=== Preflight checks ===
+  [FAIL] container tool: 'docker info' failed: the daemon is not running, or
+         /var/run/docker.sock is not accessible to you.
+         Use podman instead: CONTAINER_TOOL=podman make dev-setup
+  [warn] local registry: docker is not configured for insecure registry kind-registry:5000
+         Fix: echo '{"insecure-registries": ["kind-registry:5000"]}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
+         Or use podman, which is working on this host and needs no daemon.json entry: CONTAINER_TOOL=podman make dev-setup
+         Or avoid the registry entirely: DEV_REGISTRY=local (kind load) or SKIP_REGISTRY=true.
+```
+
+Covered: container runtime reachability, rootless podman user namespaces and
+`cpuset` cgroup delegation, inotify limits, `/etc/hosts` and docker
+`daemon.json` entries for the local registry, `nfsd` for `SETUP_NFS_RWX`,
+`losetup` and sudo for `KIND_BLOCK_STORAGE`, runtime socket access for
+`SETUP_DOCKER_SOCKET`, and a Kind cluster that belongs to the *other* runtime.
+`[FAIL]` blocks setup, `[warn]` does not.
+
+### Docker or podman?
+
+Both work for the standard flow. Pick by what the host already allows — the
+privileges each one needs are different:
+
+| | podman (rootless) | docker |
+|---|---|---|
+| Daemon | none; needs subuid/subgid and `cpuset` cgroup delegation (see below) | needs a running daemon and access to `/var/run/docker.sock` (usually the `docker` group) |
+| Local registry | no host config; images pushed with `--tls-verify=false` | needs `insecure-registries` in `/etc/docker/daemon.json` plus a daemon restart (root) |
+| `KIND_BLOCK_STORAGE` | works; the loop device needs sudo either way | works; the loop device needs sudo either way |
+| `SETUP_DOCKER_SOCKET` (FAR `fence_kind`) | set `CONTAINER_SOCKET_PATH=/run/user/$(id -u)/podman/podman.sock` after `systemctl --user start podman.socket` | works out of the box when you can use the socket |
+| CI | used by the standard Kind workflow | used by the block, fs, and MDR workflows |
+
+A Kind cluster belongs to the runtime that created it, so don't switch
+`CONTAINER_TOOL` mid-cluster — tear down first, or keep using the original
+tool (auto-discovery prefers whichever runtime owns the existing cluster).
+
+### Container tool selection
+
+`CONTAINER_TOOL` from the environment or the make command line is always used as
+given — the dev targets only warn when the tool does not respond. Anything else
+is auto-discovered by [`container-tool.sh`](../dev/container-tool.sh), which
+accepts a tool only when `<tool> info` succeeds, so an installed docker with a
+stopped daemon (or an unreachable `/var/run/docker.sock`) is skipped instead of
+failing later inside Kind. A `CONTAINER_TOOL ?= docker` default in an operator's
+Makefile counts as a default, not a choice: it is kept while it works and
+replaced by a working tool otherwise.
+
+When both tools work, discovery prefers the one that already owns the Kind
+cluster's containers, then podman, then docker.
+
+```bash
+dev/container-tool.sh detect        # print the tool that would be used
+dev/container-tool.sh check docker  # exit 0 when docker is usable
+dev/container-tool.sh hint docker   # explain why docker is not usable
+```
+
 ### Podman rootless setup
 
 Rootless podman requires `cpuset` cgroup delegation for Kind worker nodes. Without it, kubelet cannot start inside the containers. The setup script detects this and prints instructions.
@@ -252,9 +314,11 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 
 | Target | Description |
 |--------|-------------|
-| `dev-setup` | Create Kind cluster with all dependencies (`SKIP_KIND=true` for external cluster, `KIND_HA=true` for 3 CP + 3 workers) |
+| `dev-preflight` | Check host prerequisites and permissions, change nothing (also run by `dev-setup`) |
+| `dev-setup` | Set up the cluster you are logged into (after confirming), or create Kind when nothing is reachable (`USE_KIND=true` forces Kind, `SKIP_KIND=true` confirms the session cluster, `KIND_HA=true` for 3 CP + 3 workers) |
 | `dev-teardown` | Destroy Kind cluster and local registry (`KEEP_REGISTRY=true` preserves a shared registry) |
-| `dev-build` | Build operator image and load into Kind (or push to ttl.sh) |
+| `dev-check-cluster` | Verify there is a usable cluster to deploy on: API reachable, kubectl context is the dev cluster, at least one Ready node. Runs first in `dev-deploy`, `dev-redeploy`, `dev-bundle-run`, `dev-olm-deploy`, `dev-olm-upgrade` |
+| `dev-build` | Build operator image and load into Kind (or push to ttl.sh). Verifies the image target (registry running, or Kind cluster present for `DEV_REGISTRY=local`) before building |
 | `dev-deploy` | Build + install CRDs + deploy + configure cert-manager |
 | `dev-redeploy` | Rebuild and restart (deletes pods to pick up new image) |
 | `dev-undeploy` | Remove operator from cluster |
@@ -281,25 +345,31 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 
 ## Using an Existing Cluster (OCP, etc.)
 
-For external clusters (OCP, etc.), set `SKIP_KIND=true` to skip Kind
-creation. Images are pushed to [ttl.sh](https://ttl.sh) — an anonymous,
-ephemeral registry that requires no auth.
+The cluster you are logged into wins. Every `dev-*` target reads the current
+kubectl/oc context: if it is not the Kind dev cluster, the targets work against
+that cluster and images go to [ttl.sh](https://ttl.sh) — an anonymous,
+ephemeral registry that needs no auth. Kind is created only when you ask for it
+(`USE_KIND=true`), when the Kind dev cluster *is* your context, or when nothing
+is reachable.
 
 ```bash
-# Point kubectl at your cluster, then use the same workflow
-export KUBECONFIG=~/.kube/my-ocp-cluster
-export SKIP_KIND=true
+oc login --token=... --server=https://api.my-cluster:6443
 
-make dev-setup              # Configures namespaces + cert-manager (no Kind)
-make dev-deploy             # Builds image, pushes to ttl.sh, deploys
+make dev-setup              # Asks to confirm, then configures that cluster
+make dev-deploy             # Builds image, pushes to ttl.sh, deploys there
 make dev-describe           # Verify everything is running
 make dev-simulate-failure   # Prints oc debug command (safe by default)
 make dev-undeploy           # Remove operator from cluster
 ```
 
-Exporting `SKIP_KIND=true` ensures all targets know this is an external cluster.
-Without it, auto-detection might find a local Kind cluster and use the wrong
-image delivery method.
+`make dev-setup` confirms before touching a cluster you are logged into, since
+it creates namespaces and installs cert-manager and OLM when they are missing.
+In a non-interactive shell it refuses instead of guessing; pass `SKIP_KIND=true`
+to confirm up front, or `USE_KIND=true` to get a local Kind cluster regardless.
+
+Preflight adapts to the target: for a session cluster it checks that you can
+create namespaces, CRDs and cluster roles, and reports the image delivery
+(`DEV_REGISTRY=local` is rejected — `kind load` cannot reach a remote cluster).
 
 You can also use ttl.sh with a Kind cluster:
 
@@ -316,7 +386,8 @@ commands to run instead of executing them directly (safety first). Set
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KIND_HA` | `false` | Set to `true` for HA cluster (3 CP + 3 workers, for SNR CP testing) |
-| `SKIP_KIND` | `false` | Set to `true` to skip Kind creation (external cluster) |
+| `SKIP_KIND` | `false` | Use the cluster you are logged into without being asked |
+| `USE_KIND` | `false` | Force the local Kind cluster even when logged in elsewhere |
 | `DEV_REGISTRY` | `registry` (Kind) / `ttl.sh` (external) | Image delivery: `registry`, `local`, or `ttl.sh`. OLM bundles require a registry. |
 | `DEV_IMG` | auto-generated | Override to use a custom image name |
 | `TTL_SH_TTL` | `2h` | Image expiry when using ttl.sh |
@@ -324,7 +395,7 @@ commands to run instead of executing them directly (safety first). Set
 | `MEDIK8S_REGISTRY_NAME` | `kind-registry` | Local registry container name |
 | `MEDIK8S_REGISTRY_PORT` | `5000` | Local registry host port |
 | `KEEP_REGISTRY` | `false` | Preserve the registry container during `dev-teardown`, for example when another cluster shares it |
-| `CONTAINER_TOOL` | auto-detected | `docker` or `podman` |
+| `CONTAINER_TOOL` | auto-discovered | `docker` or `podman`. Set explicitly to pin one; otherwise only a tool that responds to `<tool> info` is picked ([details](#container-tool-selection)) |
 | `KUBECTL` | auto-detected | `kubectl` or `oc` |
 | `NHC_UNHEALTHY_DURATION` | `300s` | Unhealthy condition duration for NHC CR |
 | `DEV_FORCE_SIMULATE` | `false` | Set to `true` to auto-execute failure simulation on external clusters (via `oc debug`) |

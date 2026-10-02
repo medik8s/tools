@@ -66,8 +66,13 @@ class MDRSetup(unittest.TestCase):
         )
 
     def calls(self):
+        # Drop the container tool probes ("docker info"): common.sh runs them to
+        # check that the selected tool responds, before any cluster work.
         path = self.root / "calls"
-        return path.read_text() if path.exists() else ""
+        if not path.exists():
+            return ""
+        return "".join(line for line in path.read_text().splitlines(keepends=True)
+                       if line.split() != ["docker", "info"])
 
     def test_mock_is_opt_in(self):
         result = self.setup_cluster(MDR_CRD_DIR="")
