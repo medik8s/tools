@@ -72,9 +72,8 @@ class TestExtractNotableChanges:
 class TestBuildUpstreamTemplate:
     def test_full_message(self):
         expected = (
-            "On behalf of the Medik8s team, I am pleased to announce a new round of releases\n"
-            "for our operators. All releases are now available on the Kubernetes OperatorHub\n"
-            "and OKD.\n"
+            "The Medik8s team is pleased to announce a new round of releases for our operators.\n"
+            "All releases are now available on the Kubernetes OperatorHub and OKD.\n"
             "\n"
             "The release consists of these operators:\n"
             "\n"
@@ -88,7 +87,8 @@ class TestBuildUpstreamTemplate:
             "https://github.com/medik8s/fence-agents-remediation/releases/tag/v0.8.0\n"
             "\n"
             "For more, visit our website https://www.medik8s.io/, contribute on GitHub\n"
-            "https://github.com/medik8s, and DM for more.\n"
+            "https://github.com/medik8s, join our mailing list https://groups.google.com/g/medik8s,\n"
+            "and follow us on LinkedIn https://www.linkedin.com/company/medik8s.\n"
         )
         assert build_upstream_template(FAKE_RELEASES) == expected
 

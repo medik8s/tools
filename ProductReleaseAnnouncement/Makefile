@@ -19,4 +19,4 @@ test: $(VENV)
 
 .PHONY: clean
 clean:
-	rm -rf $(VENV) .pytest_cache release.md release.html release-slack.txt
+	rm -rf $(VENV) .pytest_cache release.md release.html release-notes-*.md

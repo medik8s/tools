@@ -39,7 +39,7 @@ source venv/bin/activate
 ./product_rel_announcement.py --markdown --operator snr,far
 ```
 
-Output files: `release.md`, `release.html`, `release-slack.txt`.
+Output files: `release.md`, `release.html`, `release-notes-<ver>.md`.
 
 ### Options
 
@@ -47,7 +47,7 @@ Output files: `release.md`, `release.html`, `release-slack.txt`.
 |------|-------------|
 | `--markdown` | Write `release.md` |
 | `--html` | Write `release.html` |
-| `--slack` | Write `release-slack.txt` (requires `--rhwa-version`) |
+| `--slack` | Write `release-notes-<ver>.md` (requires `--rhwa-version`) |
 | `--rhwa-version=<ver>` | RHWA release version (e.g. `4.21-0`) |
 | `--slack-changes=<file>` | File with curated notable changes for Slack (one per line). Falls back to GitHub |
 | `--operator=<ops>` | Comma-separated operator keys: `nmo`, `nhc`, `snr`, `far`, `mdr`, `sbr` |
