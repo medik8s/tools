@@ -12,33 +12,86 @@ MEDIK8S_NAMESPACE ?= medik8s-system
 TOOLS_DIR ?= $(shell cd .. && pwd)/tools
 DEV_DIR := $(TOOLS_DIR)/dev
 
-# CONTAINER_TOOL for dev targets: auto-detect docker/podman if not set.
-# Honors CONTAINER_TOOL from environment or make command line (e.g. CI uses
-# CONTAINER_TOOL=docker to avoid rootless podman issues on GitHub Actions).
-# The operator's Makefile may also set CONTAINER_TOOL; we respect that.
+# CONTAINER_TOOL for dev targets.
+#
+# Precedence:
+#   1. CONTAINER_TOOL from the environment or the make command line — the
+#      caller's explicit choice (CI pins docker this way). Always honored; we
+#      only warn when it cannot work.
+#   2. A plain Makefile default ("CONTAINER_TOOL ?= docker", which most operator
+#      Makefiles carry) — kept while it works, replaced by a working tool when
+#      it does not.
+#   3. Unset — discovered.
+#
+# Discovery accepts only a tool whose daemon answers (see container-tool.sh), so
+# an installed-but-not-running docker no longer takes precedence and leaves kind
+# failing with "failed to get docker info".
 # Must be defined before DEV_CLUSTER_TYPE which uses it for KIND_EXPERIMENTAL_PROVIDER.
-ifndef CONTAINER_TOOL
-  CONTAINER_TOOL := $(shell \
-    if command -v podman >/dev/null 2>&1; then echo podman; \
-    elif command -v docker >/dev/null 2>&1; then echo docker; \
-    else echo ""; \
-    fi \
-  )
-endif
-ifeq ($(CONTAINER_TOOL),)
-  $(error No container tool found. Please install docker or podman.)
+_DEV_CT_SCRIPT := $(wildcard $(DEV_DIR)/container-tool.sh)
+_DEV_CT_ORIGIN := $(origin CONTAINER_TOOL)
+_DEV_CT_EXPLICIT := $(findstring environment,$(_DEV_CT_ORIGIN))$(findstring command line,$(_DEV_CT_ORIGIN))
+
+ifeq ($(_DEV_CT_SCRIPT),)
+  # Tools checkout without container-tool.sh: plain PATH lookup, as before.
+  ifndef CONTAINER_TOOL
+    CONTAINER_TOOL := $(shell \
+      if command -v podman >/dev/null 2>&1; then echo podman; \
+      elif command -v docker >/dev/null 2>&1; then echo docker; \
+      fi \
+    )
+  endif
+  ifeq ($(CONTAINER_TOOL),)
+    $(error No container tool found. Please install docker or podman.)
+  endif
+else
+  ifeq ($(shell $(_DEV_CT_SCRIPT) check '$(CONTAINER_TOOL)' && echo ok),)
+    ifneq ($(_DEV_CT_EXPLICIT),)
+      $(warning CONTAINER_TOOL=$(CONTAINER_TOOL) is set explicitly, but $(shell $(_DEV_CT_SCRIPT) hint '$(CONTAINER_TOOL)'))
+    else
+      _DEV_CT_DETECTED := $(shell MEDIK8S_CLUSTER_NAME='$(MEDIK8S_CLUSTER_NAME)' $(_DEV_CT_SCRIPT) detect)
+      ifeq ($(_DEV_CT_DETECTED),)
+        $(warning No usable container tool found: $(shell $(_DEV_CT_SCRIPT) hint podman) $(shell $(_DEV_CT_SCRIPT) hint docker))
+        ifeq ($(CONTAINER_TOOL),)
+          # No daemon answers, but keep dev-help and dev-preflight usable: fall
+          # back to whichever CLI is installed and let those targets explain.
+          CONTAINER_TOOL := $(shell \
+            if command -v podman >/dev/null 2>&1; then echo podman; \
+            elif command -v docker >/dev/null 2>&1; then echo docker; \
+            fi \
+          )
+          ifeq ($(CONTAINER_TOOL),)
+            $(error No container tool found. Please install docker or podman.)
+          endif
+        endif
+      else
+        ifneq ($(CONTAINER_TOOL),)
+          $(info Using $(_DEV_CT_DETECTED) instead of the default CONTAINER_TOOL=$(CONTAINER_TOOL): $(shell $(_DEV_CT_SCRIPT) hint '$(CONTAINER_TOOL)'))
+        endif
+        CONTAINER_TOOL := $(_DEV_CT_DETECTED)
+      endif
+    endif
+  endif
 endif
 
-# Detect cluster type: "kind" if a Kind cluster exists, "external" otherwise.
-# Uses CONTAINER_TOOL to set KIND_EXPERIMENTAL_PROVIDER (needed for podman).
-# When SKIP_KIND=true, force external mode (the user explicitly opted out of Kind).
-# Override with DEV_CLUSTER_TYPE=external to force external mode in other cases.
-ifeq ($(SKIP_KIND),true)
+# Cluster type follows the kubectl context you are actually on — building and
+# deploying must target the cluster you are logged into, not whichever cluster
+# happens to exist locally:
+#   context is the Kind dev cluster       -> kind     (local registry)
+#   any other context (OpenShift, …)      -> external (ttl.sh, deploy there)
+#   no context, but the Kind cluster is   -> kind
+#   neither                               -> external
+# USE_KIND=true forces kind, SKIP_KIND=true forces external; override directly
+# with DEV_CLUSTER_TYPE=kind|external.
+ifeq ($(USE_KIND),true)
+  DEV_CLUSTER_TYPE ?= kind
+else ifeq ($(SKIP_KIND),true)
   DEV_CLUSTER_TYPE ?= external
 else
   DEV_CLUSTER_TYPE ?= $(shell \
-    if KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get clusters 2>/dev/null | grep -q '^$(MEDIK8S_CLUSTER_NAME)$$'; then echo kind; \
-    elif $(KUBECTL) cluster-info --context 'kind-$(MEDIK8S_CLUSTER_NAME)' >/dev/null 2>&1; then echo kind; \
+    CTX=$$($(KUBECTL) config current-context 2>/dev/null); \
+    if [ "$$CTX" = 'kind-$(MEDIK8S_CLUSTER_NAME)' ]; then echo kind; \
+    elif [ -n "$$CTX" ]; then echo external; \
+    elif KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get clusters 2>/dev/null | grep -q '^$(MEDIK8S_CLUSTER_NAME)$$'; then echo kind; \
     else echo external; \
     fi \
   )
@@ -99,8 +152,15 @@ endif
 
 export MEDIK8S_CLUSTER_NAME
 export MEDIK8S_NAMESPACE
+# Pass the resolved tool to the dev scripts, so they do not rediscover it (or
+# inherit a broken default exported by the operator's Makefile).
+export CONTAINER_TOOL
+# Image delivery, so the scripts can report what a deploy will actually do.
+export DEV_REGISTRY
 export KIND_BLOCK_STORAGE
 export KIND_BLOCK_STATE_DIR
+export SKIP_KIND
+export USE_KIND
 export SETUP_MDR_MOCK
 export MDR_CRD_DIR
 
@@ -131,20 +191,80 @@ dev-cluster-info: ## Show cluster version, connection info, and node status
 	@echo ""
 	@$(KUBECTL) get nodes -o=wide
 
+.PHONY: dev-preflight
+dev-preflight: ## Check the host (container tool, permissions, limits, registry config) without changing anything
+	@$(DEV_DIR)/preflight.sh
+
 .PHONY: dev-setup
-dev-setup: ## Create Kind cluster and configure dependencies (SKIP_KIND=true for existing clusters, KIND_HA=true for 3 CP)
-	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(KIND_HA)),--ha)
+dev-setup: ## Set up the cluster you are logged into, or create Kind (USE_KIND=true forces Kind, KIND_HA=true for 3 CP)
+	@$(DEV_DIR)/setup.sh $(if $(filter true,$(SKIP_KIND)),--skip-kind) $(if $(filter true,$(USE_KIND)),--use-kind) $(if $(filter true,$(KIND_HA)),--ha)
 
 .PHONY: dev-teardown
 dev-teardown: ## Destroy the Kind dev cluster
-ifeq ($(SKIP_KIND),true)
+ifeq ($(DEV_CLUSTER_TYPE),external)
 	@echo "External cluster — nothing to tear down. Use 'make dev-undeploy' to remove operators."
 else
 	@$(DEV_DIR)/teardown.sh
 endif
 
+# Fail-fast guards: verifying the deploy target costs a second, finding out
+# after a container build costs minutes — and a wrong kubectl context would
+# otherwise deploy the operator into whatever cluster happens to be current.
+.PHONY: dev-check-cluster
+dev-check-cluster: ## Verify there is a usable cluster to deploy on (API up, right context, Ready nodes)
+ifeq ($(DEV_CLUSTER_TYPE),kind)
+	@CTX=$$($(KUBECTL) config current-context 2>/dev/null || true); \
+	if [ -n "$$CTX" ] && [ "$$CTX" != "kind-$(MEDIK8S_CLUSTER_NAME)" ]; then \
+		echo "Error: kubectl context is '$$CTX', but the dev cluster is 'kind-$(MEDIK8S_CLUSTER_NAME)' — refusing to deploy into an unexpected cluster." >&2; \
+		echo "  Switch context:         $(KUBECTL) config use-context kind-$(MEDIK8S_CLUSTER_NAME)" >&2; \
+		echo "  Or deploy to '$$CTX' on purpose: SKIP_KIND=true make <target>" >&2; \
+		exit 1; \
+	fi; \
+	if ! KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get clusters 2>/dev/null | grep -q '^$(MEDIK8S_CLUSTER_NAME)$$'; then \
+		echo "  Warning: Kind cluster '$(MEDIK8S_CLUSTER_NAME)' is not visible to $(CONTAINER_TOOL); image loading and node commands may fail. See 'make dev-preflight'." >&2; \
+	fi
+endif
+	@CTX=$$($(KUBECTL) config current-context 2>/dev/null || true); \
+	if ! $(KUBECTL) cluster-info --request-timeout=5s >/dev/null 2>&1; then \
+		echo "Error: no reachable cluster to deploy on (kubectl context: $${CTX:-none})." >&2; \
+		echo "  Create the dev cluster:  make dev-setup" >&2; \
+		echo "  Or use an existing one:  export KUBECONFIG=<path> SKIP_KIND=true" >&2; \
+		exit 1; \
+	fi; \
+	NODES=$$($(KUBECTL) get nodes --no-headers --request-timeout=10s 2>/dev/null || true); \
+	if [ -z "$$NODES" ]; then \
+		echo "  Cluster: $$CTX (nodes not listable — skipping readiness check)"; \
+	else \
+		READY=$$(printf '%s\n' "$$NODES" | awk '$$2 == "Ready" { n++ } END { print n+0 }'); \
+		if [ "$$READY" -eq 0 ]; then \
+			echo "Error: cluster '$$CTX' has no Ready nodes — nothing to deploy on." >&2; \
+			$(KUBECTL) get nodes >&2 || true; \
+			echo "  Wait for the nodes, or recreate the cluster: make dev-teardown dev-setup" >&2; \
+			exit 1; \
+		fi; \
+		echo "  Cluster: $$CTX ($$READY Ready node(s))"; \
+	fi
+
+.PHONY: dev-check-image-target
+dev-check-image-target: ## Verify the image delivery target (local registry or Kind) is ready
+ifeq ($(DEV_REGISTRY),registry)
+	@[ "$$($(CONTAINER_TOOL) container inspect -f '{{.State.Running}}' $(MEDIK8S_REGISTRY_NAME) 2>/dev/null)" = true ] || { \
+		echo "Error: registry container '$(MEDIK8S_REGISTRY_NAME)' is not running under $(CONTAINER_TOOL) — the image would build and then fail to push." >&2; \
+		echo "  Start it:             make dev-setup" >&2; \
+		echo "  Or deliver otherwise: DEV_REGISTRY=local (kind load) or DEV_REGISTRY=ttl.sh" >&2; \
+		exit 1; }
+else ifeq ($(DEV_REGISTRY),local)
+	@KIND_EXPERIMENTAL_PROVIDER=$(CONTAINER_TOOL) kind get clusters 2>/dev/null | grep -q '^$(MEDIK8S_CLUSTER_NAME)$$' || { \
+		echo "Error: Kind cluster '$(MEDIK8S_CLUSTER_NAME)' not found for $(CONTAINER_TOOL) — DEV_REGISTRY=local delivers images with 'kind load'." >&2; \
+		echo "  Create it:       make dev-setup" >&2; \
+		echo "  Or push instead: DEV_REGISTRY=registry or DEV_REGISTRY=ttl.sh" >&2; \
+		exit 1; }
+else
+	@: # ttl.sh needs no local delivery target
+endif
+
 .PHONY: dev-build
-dev-build: ## Build operator image and load into Kind or push to registry/ttl.sh
+dev-build: dev-check-image-target ## Build operator image and load into Kind or push to registry/ttl.sh
 	@# For local: patch imagePullPolicy to IfNotPresent (no registry, images loaded directly).
 	@# For registry/ttl.sh: keep imagePullPolicy as Always (image pulled from registry).
 	@# The SNR controller reconciles DaemonSets from templates baked into the image,
@@ -184,7 +304,7 @@ else
 endif
 
 .PHONY: dev-deploy
-dev-deploy: dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, install CRDs, and deploy operator
+dev-deploy: dev-check-cluster dev-build install $(if $(ENVSUBST),envsubst) ## Build, load image, install CRDs, and deploy operator
 	@# Backup kustomization.yaml, set dev image, build+apply, then restore (even on failure).
 	@cp config/manager/kustomization.yaml config/manager/kustomization.yaml.dev-bak; \
 	trap 'mv config/manager/kustomization.yaml.dev-bak config/manager/kustomization.yaml' EXIT; \
@@ -271,7 +391,7 @@ dev-undeploy: ## Remove operator from dev cluster
 	fi
 
 .PHONY: dev-bundle-run
-dev-bundle-run: dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk + local registry)
+dev-bundle-run: dev-check-cluster dev-build ## Deploy operator via OLM bundle (requires OLM + operator-sdk + local registry)
 	@if ! command -v operator-sdk >/dev/null 2>&1; then \
 		echo "Error: operator-sdk is required for bundle-run. Install from: https://sdk.operatorframework.io/docs/installation/"; \
 		exit 1; \
@@ -402,6 +522,16 @@ dev-olm-validate-inputs:
 				{ echo "Error: NHC related images must use digest pullspecs." >&2; exit 1; }; \
 		done; \
 	fi
+ifeq ($(DEV_REGISTRY),registry)
+	@# Unlike dev-build, the bundle and catalog images are pushed and rendered
+	@# under the registry hostname from the host, so it has to resolve here.
+	@if command -v getent >/dev/null 2>&1 && ! getent hosts $(MEDIK8S_REGISTRY_NAME) >/dev/null 2>&1; then \
+		echo "Error: the host cannot resolve '$(MEDIK8S_REGISTRY_NAME)' — bundle and catalog images are pushed and rendered as $(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT)." >&2; \
+		echo "  Fix: echo '127.0.0.1 $(MEDIK8S_REGISTRY_NAME)' | sudo tee -a /etc/hosts" >&2; \
+		echo "  Or push elsewhere: DEV_REGISTRY=ttl.sh" >&2; \
+		exit 1; \
+	fi
+endif
 
 .PHONY: dev-olm-build-push
 dev-olm-build-push: dev-olm-validate-inputs dev-build dev-olm-operator-sdk ## Build and push source, operand, and OLM bundle images
@@ -480,7 +610,7 @@ dev-olm-print-released-bundle-repository: ## Print the configured released bundl
 	@echo "$(DEV_OLM_RELEASED_BUNDLE_REPOSITORY)"
 
 .PHONY: dev-olm-deploy dev-olm-upgrade dev-olm-undeploy
-dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sdk
+dev-olm-deploy: dev-check-cluster dev-olm-build-push ## Install the source bundle with operator-sdk
 	@$(KUBECTL) get namespace "$(DEV_OLM_OPERATOR_NAMESPACE)" >/dev/null 2>&1 || \
 		$(KUBECTL) create namespace "$(DEV_OLM_OPERATOR_NAMESPACE)"
 	@if [ "$(OPERATOR_NAME)" = self-node-remediation ]; then \
@@ -493,7 +623,7 @@ dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sd
 		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)" \
 		$(if $(filter registry,$(DEV_REGISTRY)),--use-http)
 
-dev-olm-upgrade: dev-olm-build-push ## Upgrade an existing operator-sdk bundle installation
+dev-olm-upgrade: dev-check-cluster dev-olm-build-push ## Upgrade an existing operator-sdk bundle installation
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle-upgrade "$(DEV_OLM_BUNDLE_IMAGE)" \
 		--security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)" \
 		$(if $(filter registry,$(DEV_REGISTRY)),--use-http)
@@ -516,7 +646,7 @@ dev-bundle-cleanup: ## Remove OLM bundle deployment
 		$(if $(filter registry,$(DEV_REGISTRY)),IMAGE_REGISTRY=$(MEDIK8S_REGISTRY_NAME):$(MEDIK8S_REGISTRY_PORT))
 
 .PHONY: dev-redeploy
-dev-redeploy: dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
+dev-redeploy: dev-check-cluster dev-build ## Rebuild image and restart operator pods (deletes pods to pick up new image)
 	@NS="$(_dev_find_ns)"; \
 	if [ -n "$$NS" ]; then \
 		echo "Deleting operator pods in $$NS to pick up new image..."; \
@@ -735,10 +865,12 @@ dev-help: ## Show dev environment help
 	@echo "Medik8s Development Environment"
 	@echo ""
 	@echo "Lifecycle:"
+	@echo "  make dev-preflight          Check host prerequisites and permissions (changes nothing)"
 	@echo "  make dev-setup              Create Kind cluster (1 CP + 3 workers) + local registry"
 	@echo "  make dev-teardown           Destroy cluster"
 	@echo ""
 	@echo "Build & Deploy:"
+	@echo "  make dev-check-cluster      Verify a usable cluster (runs before deploy targets)"
 	@echo "  make dev-build              Build image and push to local registry"
 	@echo "  make dev-deploy             Build + install CRDs + deploy operator"
 	@echo "  make dev-redeploy           Rebuild and restart (fast iteration)"
@@ -768,10 +900,12 @@ dev-help: ## Show dev environment help
 	@echo "  make dev-ci-debug           Print debug info for CI failures"
 	@echo ""
 	@echo "Configuration (environment variables):"
+	@echo "  CONTAINER_TOOL=docker|podman  Pin the container tool (default: first one that responds)"
 	@echo "  DEV_REGISTRY=registry       Push to local Kind registry (default for Kind)"
 	@echo "  DEV_REGISTRY=local          Load directly into Kind nodes (no OLM bundle support)"
 	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
-	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
+	@echo "  SKIP_KIND=true              Use the cluster you are logged into, without confirming"
+	@echo "  USE_KIND=true               Force the local Kind cluster even when logged in elsewhere"
 	@echo "  KIND_BLOCK_STORAGE=true     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
 	@echo "  KIND_BLOCK_STATE_DIR=/path  Block state and isolated kubeconfig (use same path for teardown)"
 	@echo "  SETUP_MDR_MOCK=true         Install Machine API CRDs and mock worker fixtures for MDR"

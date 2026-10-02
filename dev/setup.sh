@@ -16,7 +16,9 @@ CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
 # their own namespaces (from kustomization.yaml), not this one.
 DEV_NS="${MEDIK8S_NAMESPACE:-medik8s-system}"
 INSTALL_OLM=true
-SKIP_KIND=false
+# Honor both the flag and the environment: CI sets these as variables.
+SKIP_KIND="${SKIP_KIND:-false}"
+USE_KIND="${USE_KIND:-false}"
 SKIP_INOTIFY_CHECK=false
 SKIP_REGISTRY="${SKIP_REGISTRY:-false}"
 REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
@@ -30,6 +32,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-kind)
             SKIP_KIND=true
+            shift
+            ;;
+        --use-kind)
+            USE_KIND=true
             shift
             ;;
         --skip-olm)
@@ -57,10 +63,14 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--skip-kind] [--skip-olm] [--skip-inotify-check] [--ha] [--name <cluster-name>]"
+            echo "Usage: $0 [--skip-kind|--use-kind] [--skip-olm] [--skip-inotify-check] [--ha] [--name <cluster-name>]"
+            echo ""
+            echo "Without either flag, the cluster you are logged into is used (after"
+            echo "confirmation); Kind is created when nothing is reachable."
             echo ""
             echo "Options:"
-            echo "  --skip-kind           Skip Kind cluster creation (use existing cluster)"
+            echo "  --skip-kind           Use the cluster you are logged into, no questions asked"
+            echo "  --use-kind            Create/use the local Kind cluster even when logged in elsewhere"
             echo "  --skip-olm            Skip OLM installation"
             echo "  --skip-registry       Skip local registry creation"
             echo "  --skip-inotify-check  Skip inotify limits check"
@@ -133,8 +143,71 @@ check_tool() {
 echo "Using kubectl command: ${KUBECTL}"
 echo "Using container tool: ${CONTAINER_TOOL}"
 
+# Which cluster is this run about? The session you are logged into wins; Kind
+# is for when you ask for it, or when there is nothing to log into. Decided
+# before the host checks so they only run when a Kind cluster is involved.
+#
+#   --skip-kind / SKIP_KIND=true     use the current session (explicit)
+#   --use-kind  / USE_KIND=true      create/use Kind even if logged in elsewhere
+#   KIND_BLOCK_STORAGE/SETUP_MDR_MOCK  imply Kind: they build Kind nodes
+#   context is kind-<cluster name>   the dev cluster is the session
+#   any other reachable context      use it, after confirming
+#   nothing reachable                create the Kind cluster
+if [ "${USE_KIND}" = true ] && [ "${SKIP_KIND}" = true ]; then
+    echo "Error: --use-kind and --skip-kind are mutually exclusive." >&2
+    exit 1
+fi
+
+CURRENT_CONTEXT=$(${KUBECTL} config current-context 2>/dev/null || true)
+if [ "${SKIP_KIND}" != true ] && [ "${USE_KIND}" != true ] && \
+   [ -n "${CURRENT_CONTEXT}" ] && [ "${CURRENT_CONTEXT}" != "kind-${CLUSTER_NAME}" ]; then
+    if [ "${KIND_BLOCK_STORAGE}" = true ] || [ "${SETUP_MDR_MOCK:-false}" = true ]; then
+        echo "Note: KIND_BLOCK_STORAGE/SETUP_MDR_MOCK need Kind nodes — creating the Kind cluster"
+        echo "  and switching your context away from '${CURRENT_CONTEXT}'."
+    elif ! ${KUBECTL} cluster-info --request-timeout=10s >/dev/null 2>&1; then
+        echo "Note: context '${CURRENT_CONTEXT}' is not reachable; creating the Kind cluster instead."
+    elif [ "${CURRENT_CONTEXT#kind-}" != "${CURRENT_CONTEXT}" ]; then
+        # Another local Kind cluster: disposable, no confirmation needed.
+        echo "Using the cluster you are on: '${CURRENT_CONTEXT}'."
+        SKIP_KIND=true
+    else
+        CURRENT_SERVER=$(${KUBECTL} config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
+        echo ""
+        echo "=== Target cluster ==="
+        echo "  You are logged into '${CURRENT_CONTEXT}'${CURRENT_SERVER:+ (${CURRENT_SERVER})}."
+        echo "  Setting up THERE means: creating the dev namespaces, and installing cert-manager"
+        echo "  and OLM if they are missing. Nothing is created locally."
+        echo "  For a local Kind cluster instead, re-run with USE_KIND=true."
+        echo ""
+        if [ -t 0 ]; then
+            read -r -p "  Configure '${CURRENT_CONTEXT}'? [y/N] " REPLY
+            case "${REPLY}" in
+                [yY]|[yY][eE][sS]) SKIP_KIND=true ;;
+                *) echo "  Aborted. Use USE_KIND=true for a local Kind cluster."; exit 1 ;;
+            esac
+        else
+            echo "  Refusing to configure a remote cluster unconfirmed in a non-interactive shell." >&2
+            echo "  Re-run with SKIP_KIND=true to confirm, or USE_KIND=true for a local Kind cluster." >&2
+            exit 1
+        fi
+    fi
+    echo ""
+fi
+
+# Check the host — permissions included — before creating anything, so a
+# missing privilege is reported with its fix instead of failing mid-setup.
+# shellcheck disable=SC2034  # read by preflight.sh, sourced below
+PF_SKIP_INOTIFY="${SKIP_INOTIFY_CHECK}"
+# setup.sh is allowed to change the host; 'make dev-preflight' is not.
+# shellcheck disable=SC2034  # read by preflight.sh, sourced below
+PF_AUTO_FIX_INOTIFY=true
+# shellcheck source=preflight.sh
+source "${SCRIPT_DIR}/preflight.sh"
+preflight_run || exit 1
+echo ""
+
 if [ "${SKIP_KIND}" = true ]; then
-    echo "Using existing cluster (--skip-kind)."
+    echo "Using the cluster from your kubeconfig context '${CURRENT_CONTEXT:-<none>}'."
     # Verify cluster connectivity
     if ! ${KUBECTL} cluster-info >/dev/null 2>&1; then
         echo "Error: cannot connect to cluster. Check your kubeconfig."
@@ -162,20 +235,39 @@ else
     if [ "${SKIP_REGISTRY}" != true ]; then
         echo "=== Configuring host for local registry '${REG_NAME}:${REG_PORT}' ==="
 
-        # Make the registry hostname resolvable from the host.
-        if ! getent hosts "${REG_NAME}" >/dev/null 2>&1; then
+        # Make the registry hostname resolvable from the host. The OLM targets
+        # push and render ${REG_NAME}:${REG_PORT} from here, so fix it now —
+        # interactively sudo may prompt, which beats a half-usable environment.
+        if ! registry_resolves_locally "${REG_NAME}"; then
+            RESOLVED="$(registry_resolved_addresses "${REG_NAME}")"
+            if [ -n "${RESOLVED}" ]; then
+                echo "  ${REG_NAME} resolves to ${RESOLVED}, not 127.0.0.1 — adding a hosts entry that takes precedence."
+            fi
             if [ -w /etc/hosts ] || [ "$(id -u)" = "0" ]; then
                 echo "127.0.0.1 ${REG_NAME}" >> /etc/hosts
                 echo "  Added ${REG_NAME} to /etc/hosts."
-            elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
-                echo "127.0.0.1 ${REG_NAME}" | sudo tee -a /etc/hosts >/dev/null
-                echo "  Added ${REG_NAME} to /etc/hosts (via sudo)."
+            elif can_sudo; then
+                echo "  Adding ${REG_NAME} to /etc/hosts (sudo may ask for your password; Ctrl-C skips just this step)..."
+                # Ignore SIGINT here so cancelling the password prompt skips the
+                # entry instead of aborting the whole setup.
+                trap '' INT
+                _hosts_written=false
+                echo "127.0.0.1 ${REG_NAME}" | kind_sudo tee -a /etc/hosts >/dev/null && _hosts_written=true
+                trap - INT
+                if [ "${_hosts_written}" = true ]; then
+                    echo "  Added ${REG_NAME} to /etc/hosts (via sudo)."
+                else
+                    echo "  Warning: could not write /etc/hosts; ${REG_NAME} stays unresolvable from the host."
+                    echo "  dev-build and dev-deploy still work; dev-olm-* and dev-bundle-run will not."
+                    echo "  Run: echo '127.0.0.1 ${REG_NAME}' | sudo tee -a /etc/hosts"
+                fi
             else
                 echo "  Warning: ${REG_NAME} is not in /etc/hosts and we don't have write access."
+                echo "  dev-build and dev-deploy still work; dev-olm-* and dev-bundle-run will not."
                 echo "  Run: echo '127.0.0.1 ${REG_NAME}' | sudo tee -a /etc/hosts"
             fi
         else
-            echo "  ${REG_NAME} already resolvable from host."
+            echo "  ${REG_NAME} already resolves to loopback from the host."
         fi
 
         # Configure Docker to allow HTTP (insecure) access to the registry.
@@ -183,8 +275,10 @@ else
         if [ "${CONTAINER_TOOL}" = "docker" ]; then
             DAEMON_JSON="/etc/docker/daemon.json"
             INSECURE_ENTRY="${REG_NAME}:${REG_PORT}"
-            if [ -f "${DAEMON_JSON}" ] && grep -q "${INSECURE_ENTRY}" "${DAEMON_JSON}" 2>/dev/null; then
-                echo "  Docker already configured for insecure registry ${INSECURE_ENTRY}."
+            # Ask the running daemon, not daemon.json: the file may be present
+            # but unapplied, and loopback registries are insecure by default.
+            if docker_registry_is_insecure "${INSECURE_ENTRY}"; then
+                echo "  Docker already allows HTTP pushes to ${INSECURE_ENTRY}."
             else
                 _write_daemon_json() {
                     local target="$1"
@@ -206,22 +300,35 @@ json.dump(d,sys.stdout,indent=2)
                 if [ -w "${DAEMON_JSON}" ] || [ "$(id -u)" = "0" ]; then
                     _write_daemon_json "${DAEMON_JSON}"
                     NEED_DOCKER_RESTART=true
-                elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+                elif can_sudo; then
+                    echo "  Configuring ${DAEMON_JSON} (sudo may ask for your password; Ctrl-C skips just this step)..."
                     TMP_DJ=$(mktemp)
-                    [ -f "${DAEMON_JSON}" ] && sudo cp "${DAEMON_JSON}" "${TMP_DJ}" && chmod 644 "${TMP_DJ}"
+                    # See the /etc/hosts step: cancelling sudo skips this, it
+                    # does not abort setup.
+                    trap '' INT
+                    if [ -f "${DAEMON_JSON}" ]; then
+                        kind_sudo cp "${DAEMON_JSON}" "${TMP_DJ}" && chmod 644 "${TMP_DJ}"
+                    fi
                     _write_daemon_json "${TMP_DJ}"
-                    sudo cp "${TMP_DJ}" "${DAEMON_JSON}"
+                    _daemon_written=false
+                    kind_sudo cp "${TMP_DJ}" "${DAEMON_JSON}" && _daemon_written=true
+                    trap - INT
+                    if [ "${_daemon_written}" = true ]; then
+                        NEED_DOCKER_RESTART=true
+                    else
+                        echo "  Warning: could not write ${DAEMON_JSON}; pushes to ${INSECURE_ENTRY} will fail over HTTP."
+                        echo "  Run: echo '{\"insecure-registries\": [\"${INSECURE_ENTRY}\"]}' | sudo tee ${DAEMON_JSON} && sudo systemctl restart docker"
+                    fi
                     rm -f "${TMP_DJ}"
-                    NEED_DOCKER_RESTART=true
                 else
                     echo "  Warning: Cannot configure Docker insecure registries (no write access)."
                     echo "  Run: echo '{\"insecure-registries\": [\"${INSECURE_ENTRY}\"]}' | sudo tee ${DAEMON_JSON} && sudo systemctl restart docker"
                 fi
                 if [ "${NEED_DOCKER_RESTART}" = true ]; then
-                    if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
-                        sudo systemctl restart docker 2>/dev/null || true
-                    else
+                    if [ "$(id -u)" = "0" ]; then
                         systemctl restart docker 2>/dev/null || true
+                    else
+                        kind_sudo systemctl restart docker 2>/dev/null || true
                     fi
                     echo "  Configured Docker insecure registry for ${INSECURE_ENTRY}."
                 fi
@@ -229,40 +336,8 @@ json.dump(d,sys.stdout,indent=2)
         fi
     fi
 
-    # Check inotify limits — Kind nodes inherit host limits and operators need many watchers.
-    # Skip on non-Linux (e.g. macOS) where /proc/sys/fs/inotify does not exist.
-    if [ "$(uname -s)" != "Linux" ]; then
-        echo "  Skipping inotify check (non-Linux host)."
-    elif [ "${SKIP_INOTIFY_CHECK}" = true ]; then
-        echo "Warning: inotify limits check skipped (--skip-inotify-check). Nodes may fail to start if limits are too low."
-    else
-        INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
-        INOTIFY_WATCHES=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
-        if [ "${INOTIFY_INSTANCES}" -lt 512 ] || [ "${INOTIFY_WATCHES}" -lt 524288 ]; then
-            echo ""
-            echo "Error: inotify limits are too low for running multiple operators in Kind."
-            echo "  Current:     max_user_instances=${INOTIFY_INSTANCES}, max_user_watches=${INOTIFY_WATCHES}"
-            echo "  Recommended: max_user_instances=8192, max_user_watches=524288"
-            echo ""
-            echo "Fix (requires sudo):"
-            echo "  sudo sysctl -w fs.inotify.max_user_instances=8192"
-            echo "  sudo sysctl -w fs.inotify.max_user_watches=524288"
-            echo ""
-            echo "To make persistent, add to /etc/sysctl.d/99-kind.conf:"
-            echo "  fs.inotify.max_user_instances=8192"
-            echo "  fs.inotify.max_user_watches=524288"
-            echo ""
-            # Try to fix automatically if running as root
-            if [ "$(id -u)" = "0" ]; then
-                echo "Running as root — fixing automatically."
-                sysctl -w fs.inotify.max_user_instances=8192 >/dev/null
-                sysctl -w fs.inotify.max_user_watches=524288 >/dev/null
-            else
-                echo "To skip this check: $0 --skip-inotify-check"
-                exit 1
-            fi
-        fi
-    fi
+    # inotify limits and rootless podman cgroup delegation are verified by
+    # preflight_run above, before anything is created.
 
     # Check if cluster already exists.
     # Try 'kind get clusters' first, but also check kubectl connectivity —
@@ -277,39 +352,6 @@ json.dump(d,sys.stdout,indent=2)
     fi
 
     if [ "${CLUSTER_EXISTS}" = false ]; then
-        # When using rootless podman, verify cgroup delegation includes cpuset.
-        # Without cpuset, kubelet inside Kind worker nodes cannot start.
-        if [ "${CONTAINER_TOOL}" = "podman" ] && [ "$(id -u)" != "0" ]; then
-            CGROUP_SUBTREE="/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.subtree_control"
-            if [ -f "${CGROUP_SUBTREE}" ]; then
-                if ! grep -q 'cpuset' "${CGROUP_SUBTREE}" 2>/dev/null; then
-                    echo ""
-                    echo "Error: rootless podman detected but 'cpuset' cgroup controller is not delegated."
-                    echo "Kind worker nodes will fail to start without it."
-                    echo ""
-                    echo "Fix: create a systemd override to delegate the required controllers:"
-                    echo ""
-                    echo "sudo mkdir -p /etc/systemd/system/user@.service.d"
-                    echo "sudo tee /etc/systemd/system/user@.service.d/delegate.conf << \"EOF\""
-                    echo "[Service]"
-                    echo "Delegate=cpu cpuset io memory pids"
-                    echo "EOF"
-                    echo "sudo systemctl daemon-reload"
-                    echo ""
-                    echo "IMPORTANT: You must log out and log back in for the changes to take effect."
-                    echo "A simple 'systemctl --user restart' is NOT sufficient — the user@.service"
-                    echo "unit must be fully restarted, which only happens at login."
-                    echo ""
-                    echo "Alternatively, create the cluster with :"
-                    echo "  sudo KIND_EXPERIMENTAL_PROVIDER=podman kind create cluster \\"
-                    echo "    --config ${KIND_CONFIG} --name ${CLUSTER_NAME}"
-                    echo "  sudo kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config"
-                    echo "Then re-run this command — it will detect the existing cluster and configure it."
-                    exit 1
-                fi
-            fi
-        fi
-
         echo "=== Creating Kind cluster '${CLUSTER_NAME}' ==="
         if [ "${KIND_BLOCK_STORAGE}" = true ]; then
             kind_block_prepare
@@ -405,6 +447,21 @@ EOF"
     fi
 
     echo "=== Waiting for all nodes to be Ready ==="
+    # 'wait --all' only covers the nodes already registered, so a worker that
+    # joins a moment later is missed — and then misses its role label too.
+    # Wait for every Kind node container to show up in the API first.
+    EXPECTED_NODES=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null | grep -c . || true)
+    if [ "${EXPECTED_NODES}" -gt 0 ]; then
+        for _ in $(seq 1 60); do
+            REGISTERED=$(${KUBECTL} get nodes --no-headers 2>/dev/null | grep -c . || true)
+            [ "${REGISTERED}" -ge "${EXPECTED_NODES}" ] && break
+            sleep 2
+        done
+        REGISTERED=$(${KUBECTL} get nodes --no-headers 2>/dev/null | grep -c . || true)
+        if [ "${REGISTERED}" -lt "${EXPECTED_NODES}" ]; then
+            echo "  Warning: only ${REGISTERED} of ${EXPECTED_NODES} nodes registered with the API server."
+        fi
+    fi
     ${KUBECTL} wait --for=condition=Ready node --all --timeout=120s
 
     echo "=== Labeling worker nodes ==="
@@ -415,9 +472,12 @@ EOF"
             if ${KUBECTL} get node "$node" -o jsonpath='{.metadata.labels}' 2>/dev/null | grep -q 'node-role.kubernetes.io/worker'; then
                 continue
             fi
-            ${KUBECTL} label node "$node" node-role.kubernetes.io/worker="" 2>/dev/null || true
-            echo "  labeled $node"
-            LABELED=$((LABELED + 1))
+            if ${KUBECTL} label node "$node" node-role.kubernetes.io/worker="" >/dev/null 2>&1; then
+                echo "  labeled $node"
+                LABELED=$((LABELED + 1))
+            else
+                echo "  Warning: could not label $node as a worker; NodeHealthCheck selects on node-role.kubernetes.io/worker."
+            fi
         fi
     done
     if [ "${LABELED}" -eq 0 ]; then
@@ -541,11 +601,55 @@ fi
 echo ""
 echo "=== Medik8s dev environment ready ==="
 echo ""
-echo "  Cluster:   ${CLUSTER_NAME}"
+SUMMARY_WARNINGS=()
+
+NODE_TOTAL=$(${KUBECTL} get nodes --no-headers 2>/dev/null | grep -c . || true)
+NODE_CP=$(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | grep -c . || true)
+NODE_WORKERS=$(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | grep -c . || true)
+NODE_LINE="${NODE_TOTAL} (${NODE_CP} CP + ${NODE_WORKERS} workers)"
+if [ "${NODE_WORKERS}" -eq 0 ] && [ "${NODE_TOTAL}" -gt "${NODE_CP}" ]; then
+    NODE_LINE="${NODE_LINE}  [WARN]"
+    SUMMARY_WARNINGS+=("$((NODE_TOTAL - NODE_CP)) node(s) carry no node-role.kubernetes.io/worker label. NodeHealthCheck and 'make dev-simulate-failure' select on it — re-run 'make dev-setup' to label them.")
+fi
+
+# Registry state: running, and resolvable from the host (the OLM targets push
+# and render under that hostname from here).
+if [ "${SKIP_KIND}" = true ]; then
+    # No local registry is created for a session cluster; images reach it over
+    # the network (DEV_REGISTRY defaults to ttl.sh for external clusters).
+    REG_LINE="not used — images are delivered per DEV_REGISTRY (default ttl.sh for external clusters)"
+elif [ "${SKIP_REGISTRY}" = true ]; then
+    REG_LINE="disabled (SKIP_REGISTRY=true)"
+elif ! ${CONTAINER_TOOL} inspect "${REG_NAME}" >/dev/null 2>&1; then
+    REG_LINE="not running  [WARN]"
+    SUMMARY_WARNINGS+=("Registry container '${REG_NAME}' is not running; 'make dev-build' with DEV_REGISTRY=registry cannot push.")
+elif ! getent hosts "${REG_NAME}" >/dev/null 2>&1; then
+    REG_LINE="${REG_NAME}:${REG_PORT}  [WARN: not resolvable from host]"
+    SUMMARY_WARNINGS+=("'${REG_NAME}' does not resolve on the host: dev-build and dev-deploy work (they push to localhost:${REG_PORT}), but dev-olm-* and dev-bundle-run do not. Fix: echo '127.0.0.1 ${REG_NAME}' | sudo tee -a /etc/hosts")
+else
+    REG_LINE="${REG_NAME}:${REG_PORT}"
+fi
+
+NEW_CONTEXT=$(${KUBECTL} config current-context 2>/dev/null || true)
+if [ "${SKIP_KIND}" = true ]; then
+    echo "  Cluster:   ${NEW_CONTEXT:-<current context>} (your kubeconfig session)"
+else
+    echo "  Cluster:   ${CLUSTER_NAME} (Kind)"
+    if [ -n "${CURRENT_CONTEXT:-}" ] && [ "${CURRENT_CONTEXT}" != "${NEW_CONTEXT}" ]; then
+        SUMMARY_WARNINGS+=("kubectl context switched from '${CURRENT_CONTEXT}' to '${NEW_CONTEXT}'. Restore it with: ${KUBECTL} config use-context ${CURRENT_CONTEXT}")
+    fi
+fi
 echo "  Namespace: ${DEV_NS}"
-echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l) ($(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l) CP + $(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | wc -l) workers)"
-echo "  Registry:  $(${CONTAINER_TOOL} inspect "${REG_NAME}" >/dev/null 2>&1 && echo "${REG_NAME}:${REG_PORT}" || echo 'not running')"
+echo "  Nodes:     ${NODE_LINE}"
+echo "  Registry:  ${REG_LINE}"
 echo "  OLM:       $(${KUBECTL} get deployment -n olm olm-operator --no-headers >/dev/null 2>&1 && echo 'installed' || echo 'not installed')"
+if [ ${#SUMMARY_WARNINGS[@]} -gt 0 ]; then
+    echo ""
+    echo "  Warnings (${#SUMMARY_WARNINGS[@]}):"
+    for warning in "${SUMMARY_WARNINGS[@]}"; do
+        echo "    - ${warning}"
+    done
+fi
 echo ""
 echo "  Next steps:"
 echo "    cd <operator-directory>"
