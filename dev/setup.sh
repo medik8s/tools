@@ -63,7 +63,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-kind           Skip Kind cluster creation (use existing cluster)"
             echo "  --skip-olm            Skip OLM installation"
             echo "  --skip-registry       Skip local registry creation"
-            echo "  --skip-inotify-check Skip inotify limits check"
+            echo "  --skip-inotify-check  Skip inotify limits check"
             echo "  --ha                  Use HA config (3 CP + 3 workers, for SNR CP testing)"
             echo "  --name                Kind cluster name (default: medik8s-dev)"
             echo ""
@@ -74,17 +74,19 @@ while [[ $# -gt 0 ]]; do
             echo "  MEDIK8S_REGISTRY_PORT     Local registry port (default: 5000)"
             echo "  MEDIK8S_CLUSTER_NAME      Kind cluster name (default: medik8s-dev)"
             echo "  MEDIK8S_NAMESPACE         Shared dev namespace (default: medik8s-system)"
-            echo "  CERT_MANAGER_VERSION      Cert-manager version (default: v1.17.2)"
-            echo "  SETUP_NULL_DEVICE_WATCHDOG Set to 'true' to create a per-node null /dev/watchdog (SBR multi-node e2e)"
-            echo "  SETUP_NFS_RWX             Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)"
-            echo "  SETUP_DOCKER_SOCKET       Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
+            echo "  CERT_MANAGER_VERSION           Cert-manager version (default: v1.17.2)
+  SETUP_NULL_DEVICE_WATCHDOG     Set to 'true' to create a per-node null /dev/watchdog (SBR multi-node e2e)
+  SETUP_NFS_RWX                  Set to 'true' to install csi-driver-nfs + NFS server StorageClass (SBR fs e2e)
+  SETUP_DOCKER_SOCKET            Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
             echo "  SETUP_MDR_MOCK            Set to 'true' to install Machine API CRDs and worker fixtures"
             echo "  MDR_CRD_DIR               Directory containing the Machine/MachineSet CRD manifests"
-            echo "  SKIP_KIND              Set to 'true' to skip Kind cluster creation"
-            echo "  SKIP_REGISTRY          Set to 'true' to skip local registry creation"
-            echo "  KIND_HA                Set to 'true' for HA config (3 CP + 3 workers)"
-            echo "  KIND_BLOCK_STORAGE     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
-            echo "  KIND_BLOCK_STATE_DIR   Absolute directory for block state and isolated kubeconfig"
+            echo "  SETUP_ETCD_GUARD_MOCK     Set to 'true' to install a mock openshift-etcd guard Deployment + PDB (implied by KIND_HA)"
+            echo "  ETCD_GUARD_IMAGE          Image for the mock etcd-guard pods (default: registry.k8s.io/pause:3.9)"
+            echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
+            echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
+            echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
+            echo "  KIND_BLOCK_STORAGE        Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
+            echo "  KIND_BLOCK_STATE_DIR      Absolute directory for block state and isolated kubeconfig"
             exit 0
             ;;
         *)
@@ -323,6 +325,8 @@ json.dump(d,sys.stdout,indent=2)
             echo "  Adding docker.sock extraMounts to kind config for control-plane node..."
             EFFECTIVE_KIND_CONFIG=$(mktemp)
             trap 'rm -f "${EFFECTIVE_KIND_CONFIG}"' EXIT
+            # Host socket path: from CONTAINER_SOCKET_PATH env (supports Podman) or default Docker path.
+            # Always mounted at /var/run/docker.sock inside the node so the Deployment patch is static.
             HOST_SOCK="${CONTAINER_SOCKET_PATH:-/var/run/docker.sock}"
             python3 - "${KIND_CONFIG}" "${EFFECTIVE_KIND_CONFIG}" "${HOST_SOCK}" <<'PYEOF'
 import sys
@@ -357,6 +361,9 @@ PYEOF
         echo "=== Cluster '${CLUSTER_NAME}' already exists — skipping creation, re-applying configuration ==="
     fi
 
+    # Create local registry for OLM bundle deployment (unless skipped).
+    # The registry runs as a container on the host and is connected to the Kind
+    # network so that Kind nodes can pull images from it.
     if [ "${SKIP_REGISTRY}" != true ]; then
         echo "=== Setting up local registry '${REG_NAME}:${REG_PORT}' ==="
         if ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
@@ -370,20 +377,30 @@ PYEOF
             echo "  Registry container '${REG_NAME}' started on port ${REG_PORT}."
         fi
 
+        # Connect registry to the kind network so nodes can reach it by container name.
         ${CONTAINER_TOOL} network connect kind "${REG_NAME}" 2>/dev/null || true
 
+        # Get the registry's IP on the kind network for node /etc/hosts entries.
+        # Nodes inherit the host's /etc/hosts (which maps kind-registry to 127.0.0.1),
+        # but inside the node 127.0.0.1 is the node itself, not the registry.
+        # shellcheck disable=SC2016  # Go template syntax; $net/$conf are not shell variables
         REG_IP=$(${CONTAINER_TOOL} inspect "${REG_NAME}" --format '{{range $net, $conf := .NetworkSettings.Networks}}{{if eq $net "kind"}}{{$conf.IPAddress}}{{end}}{{end}}' 2>/dev/null)
         if [ -z "${REG_IP}" ]; then
             echo "  Warning: could not determine registry IP on kind network, falling back to container name."
             REG_IP="${REG_NAME}"
         fi
 
+        # Configure containerd on each node to use the local registry (insecure/HTTP).
+        # Also fix /etc/hosts so kind-registry resolves to the registry container's
+        # kind-network IP, not 127.0.0.1 (which is inherited from the host).
         NODES_FOR_REG=$(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null)
         for node in ${NODES_FOR_REG}; do
             ${CONTAINER_TOOL} exec "$node" mkdir -p "/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}"
             ${CONTAINER_TOOL} exec "$node" bash -c "cat <<EOF >/etc/containerd/certs.d/${REG_NAME}:${REG_PORT}/hosts.toml
 [host.\"http://${REG_NAME}:${REG_PORT}\"]
 EOF"
+            # Fix /etc/hosts: remove any 127.0.0.1 entry for the registry and add the correct IP.
+            # Use cp instead of sed -i because /etc/hosts is a mount and can't be renamed.
             ${CONTAINER_TOOL} exec "$node" bash -c "grep -v '127.0.0.1.*${REG_NAME}' /etc/hosts > /tmp/hosts.new && echo '${REG_IP} ${REG_NAME}' >> /tmp/hosts.new && cp /tmp/hosts.new /etc/hosts && rm /tmp/hosts.new"
         done
         echo "  Containerd configured on all nodes to use ${REG_NAME}:${REG_PORT} (IP: ${REG_IP})."
@@ -403,6 +420,7 @@ EOF"
     fi
 
     echo "=== Labeling worker nodes ==="
+    # Label any non-CP nodes with the worker role (idempotent)
     LABELED=0
     for node in $(${KUBECTL} get nodes --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null); do
         if ! ${KUBECTL} get node "$node" -o jsonpath='{.metadata.labels}' 2>/dev/null | grep -q 'node-role.kubernetes.io/control-plane'; then
@@ -425,6 +443,9 @@ EOF"
         "${SCRIPT_DIR}/kind-setup-etcd-guard-mock.sh"
     fi
 
+    # Optional: per-node null-backed /dev/watchdog for SBR multi-node e2e in Kind.
+    # The real softdog device is single-open; SBR needs every node's agent to hold
+    # its own watchdog concurrently. Set SETUP_NULL_DEVICE_WATCHDOG=true to enable.
     if [ "${SETUP_NULL_DEVICE_WATCHDOG:-false}" = "true" ]; then
         echo "=== Setting up per-node null-device /dev/watchdog (SETUP_NULL_DEVICE_WATCHDOG=true) ==="
         "${SCRIPT_DIR}/setup-null-device-watchdog.sh"
@@ -445,6 +466,8 @@ EOF"
         fi
     done
 
+    # Optional: RWX NFS filesystem StorageClass for SBR filesystem-mode e2e in Kind.
+    # Requires the nfsd kernel module on the host. Set SETUP_NFS_RWX=true to enable.
     if [ "${SETUP_NFS_RWX:-false}" = "true" ]; then
         echo "=== Setting up RWX NFS filesystem StorageClass (SETUP_NFS_RWX=true) ==="
         "${SCRIPT_DIR}/setup-nfs-rwx.sh"
@@ -493,6 +516,7 @@ ${KUBECTL} label --overwrite ns "${DEV_NS}" \
     pod-security.kubernetes.io/audit=privileged \
     pod-security.kubernetes.io/warn=privileged 2>&1 | grep -v 'not labeled' || true
 
+# Also create the medik8s-leases namespace (used by common lease manager)
 if ! ${KUBECTL} get namespace medik8s-leases &>/dev/null; then
     ${KUBECTL} create namespace medik8s-leases
 else
@@ -512,14 +536,17 @@ else
     echo "  Waiting for cert-manager to be ready..."
     ${KUBECTL} wait --for=condition=Available deployment --all -n cert-manager --timeout=300s
 
+    # --- ADDED: Webhook buffer to prevent OLM deadlock ---
     echo "  Waiting for Cert-Manager webhook to stabilize in the API server..."
     sleep 15
     ${KUBECTL} wait --for=condition=Ready pod -l app.kubernetes.io/component=webhook -n cert-manager --timeout=120s
+    # -----------------------------------------------------
 fi
 
 if [ "$INSTALL_OLM" = true ]; then
     if command -v operator-sdk &>/dev/null; then
         echo "=== Installing OLM ==="
+        # --- ADDED: 5m timeout so it fails gracefully instead of hanging forever ---
         operator-sdk olm install --timeout 5m 2>/dev/null || {
             echo "  OLM may already be installed or operator-sdk olm install failed."
             echo "  Continuing without OLM. Use 'make deploy' instead of 'make bundle-run'."
