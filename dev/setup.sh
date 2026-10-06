@@ -80,6 +80,8 @@ while [[ $# -gt 0 ]]; do
   SETUP_DOCKER_SOCKET            Set to 'true' to bind-mount /var/run/docker.sock into the control-plane node (FAR fence_docker e2e)"
             echo "  SETUP_MDR_MOCK            Set to 'true' to install Machine API CRDs and worker fixtures"
             echo "  MDR_CRD_DIR               Directory containing the Machine/MachineSet CRD manifests"
+            echo "  SETUP_ETCD_GUARD_MOCK     Set to 'true' to install a mock openshift-etcd guard Deployment + PDB (implied by KIND_HA)"
+            echo "  ETCD_GUARD_IMAGE          Image for the mock etcd-guard pods (default: registry.k8s.io/pause:3.9)"
             echo "  SKIP_KIND                 Set to 'true' to skip Kind cluster creation"
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
@@ -407,6 +409,16 @@ EOF"
     echo "=== Waiting for all nodes to be Ready ==="
     ${KUBECTL} wait --for=condition=Ready node --all --timeout=120s
 
+    if [ "${KIND_HA:-false}" = "true" ]; then
+        CP_COUNT=$(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        echo "=== Verifying HA topology ==="
+        echo "Found ${CP_COUNT} control-plane nodes."
+        if [ "${CP_COUNT}" -lt 3 ]; then
+            echo "❌ ERROR: KIND_HA=true requested at least 3 control-plane nodes, but found ${CP_COUNT}." >&2
+            exit 1
+        fi
+    fi
+
     echo "=== Labeling worker nodes ==="
     # Label any non-CP nodes with the worker role (idempotent)
     LABELED=0
@@ -422,6 +434,13 @@ EOF"
     done
     if [ "${LABELED}" -eq 0 ]; then
         echo "  All worker nodes already labeled."
+    fi
+
+    # Optional: Mock etcd-guard for OpenShift etcd quorum parity in Kind HA clusters.
+    # Automatically enabled when KIND_HA=true, or explicitly with SETUP_ETCD_GUARD_MOCK=true.
+    if [ "${KIND_HA:-false}" = "true" ] || [ "${SETUP_ETCD_GUARD_MOCK:-false}" = "true" ]; then
+        echo "=== Setting up mock etcd-guard (SETUP_ETCD_GUARD_MOCK=true / KIND_HA=true) ==="
+        "${SCRIPT_DIR}/kind-setup-etcd-guard-mock.sh"
     fi
 
     # Optional: per-node null-backed /dev/watchdog for SBR multi-node e2e in Kind.
@@ -464,7 +483,7 @@ EOF"
         CONTAINER_TOOL="${CONTAINER_TOOL}" KUBECTL="${KUBECTL}" \
             python3 "${SCRIPT_DIR}/kind_mdr.py" prepare --name "${CLUSTER_NAME}" --crd-dir "${MDR_CRD_DIR}"
     fi
-    
+
     # Optional: verify docker.sock is accessible on the control-plane node.
     # The socket is mounted at cluster-creation time via extraMounts (see above).
     if [ "${SETUP_DOCKER_SOCKET:-false}" = "true" ]; then
@@ -543,7 +562,7 @@ echo "=== Medik8s dev environment ready ==="
 echo ""
 echo "  Cluster:   ${CLUSTER_NAME}"
 echo "  Namespace: ${DEV_NS}"
-echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l) ($(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l) CP + $(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | wc -l) workers)"
+echo "  Nodes:     $(${KUBECTL} get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ') ($(${KUBECTL} get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l | tr -d ' ') CP + $(${KUBECTL} get nodes -l node-role.kubernetes.io/worker --no-headers 2>/dev/null | wc -l | tr -d ' ') workers)"
 echo "  Registry:  $(${CONTAINER_TOOL} inspect "${REG_NAME}" >/dev/null 2>&1 && echo "${REG_NAME}:${REG_PORT}" || echo 'not running')"
 echo "  OLM:       $(${KUBECTL} get deployment -n olm olm-operator --no-headers >/dev/null 2>&1 && echo 'installed' || echo 'not installed')"
 echo ""
