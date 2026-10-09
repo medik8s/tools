@@ -49,14 +49,18 @@ endif
 #             Required for OLM bundle deployment. Registry is created by dev-setup.
 #   local:    loaded directly into Kind nodes via kind load (no registry, no OLM bundle support)
 #   ttl.sh:   pushed to ttl.sh (anonymous, ephemeral, no auth required, for external clusters)
+#   <registry>: pushed to a custom registry under <registry>/<operator-name>:dev
 #
 # Defaults to "registry" for Kind clusters, "ttl.sh" for external.
 # Override with DEV_REGISTRY=local to use direct Kind image loading (no OLM bundle support).
+# Published Medik8s images under quay.io/medik8s are reserved and cannot be used for DEV_REGISTRY.
 MEDIK8S_REGISTRY_NAME ?= kind-registry
 MEDIK8S_REGISTRY_PORT ?= 5000
 DEV_REGISTRY ?= $(if $(filter kind,$(DEV_CLUSTER_TYPE)),registry,ttl.sh)
-ifneq ($(filter $(DEV_REGISTRY),registry local ttl.sh),$(DEV_REGISTRY))
-  $(error Unsupported DEV_REGISTRY "$(DEV_REGISTRY)". Expected registry, local, or ttl.sh.)
+ifeq ($(filter $(DEV_REGISTRY),registry local ttl.sh),)
+  ifneq ($(filter quay.io/medik8s/%,$(DEV_REGISTRY)),)
+    $(error DEV_REGISTRY "$(DEV_REGISTRY)" is reserved for published Medik8s images.)
+  endif
 endif
 
 # Target platform for images to build
@@ -70,9 +74,12 @@ ifeq ($(DEV_REGISTRY),registry)
 else ifeq ($(DEV_REGISTRY),local)
   DEV_IMG ?= localhost:5000/medik8s/$(OPERATOR_NAME):dev
   DEV_IMG_PUSH ?= $(DEV_IMG)
-else
+else ifneq ($(filter $(DEV_REGISTRY),registry local ttl.sh),)
   TTL_SH_SUFFIX := $(shell head -c 32 /dev/urandom | base64 | tr -dc 'a-z0-9' | head -c 8)
   DEV_IMG ?= ttl.sh/medik8s-$(OPERATOR_NAME)-$(TTL_SH_SUFFIX):$(TTL_SH_TTL)
+  DEV_IMG_PUSH ?= $(DEV_IMG)
+else
+  DEV_IMG ?= $(DEV_REGISTRY)/$(OPERATOR_NAME):dev
   DEV_IMG_PUSH ?= $(DEV_IMG)
 endif
 
@@ -771,6 +778,7 @@ dev-help: ## Show dev environment help
 	@echo "  DEV_REGISTRY=registry       Push to local Kind registry (default for Kind)"
 	@echo "  DEV_REGISTRY=local          Load directly into Kind nodes (no OLM bundle support)"
 	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
+	@echo "  DEV_REGISTRY=<registry>     Push to a custom registry (except quay.io/medik8s/)"
 	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
 	@echo "  KIND_BLOCK_STORAGE=true     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
 	@echo "  KIND_BLOCK_STATE_DIR=/path  Block state and isolated kubeconfig (use same path for teardown)"
