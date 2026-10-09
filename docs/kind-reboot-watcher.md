@@ -67,10 +67,13 @@ mode does not recreate `/dev/watchdog` after restart.
 
 For the NotReady worker, the watcher looks for a
 `StorageBasedRemediation` object with a matching name across all namespaces.
-It records the current object's UID as a baseline and polls every five seconds
-for a new object whose `FencingSucceeded` condition has status `True`. Both
-parts must match: an old object that already says fencing succeeded is not
-enough.
+It polls every five seconds for an object whose `FencingSucceeded` condition
+has status `True` and whose UID has not been used for a restart attempt by this
+watcher. The object may already exist when the worker becomes NotReady.
+Handled UIDs are shared between background handlers for the watcher's lifetime,
+including the last observed UID when the timeout forces a restart. A handled
+object cannot trigger another immediate restart; the timeout fallback still
+applies. This history resets when the watcher exits.
 
 Waiting for fencing to succeed gives the victim's heartbeat time to age past
 the fencing threshold before the node agent resumes. Restarting too early
@@ -268,7 +271,7 @@ action directly.
 - `is_node_ready`: reads the node's Ready condition through Kubernetes and
   succeeds only when it is `True`.
 - `get_snr_cr_uid` / `wait_for_remediation_cr`: find a fresh SNR object by UID.
-- `get_sbr_cr_fencing_state` / `wait_for_fencing`: find a fresh SBR object
+- `get_sbr_cr_fencing_state` / `wait_for_fencing`: find an unhandled SBR object
   with `FencingSucceeded=True`.
 - The main loop rechecks NotReady nodes after ten seconds, prevents duplicate
   handling with `REBOOTING`, and clears that state when `Ready=True`.
