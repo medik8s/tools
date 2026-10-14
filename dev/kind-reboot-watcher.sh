@@ -199,6 +199,18 @@ is_node_ready() {
     [[ "$status" == "True" ]]
 }
 
+is_sbr_node_recovered() {
+    local node="$1"
+    local restarted_at state
+    # The handler publishes this only after the restart and watchdog setup finish.
+    [ -f "$SBR_HANDLED_DIR/$node.restarted" ] || return 1
+    restarted_at=$(cat "$SBR_HANDLED_DIR/$node.restarted")
+    state=$(${KUBECTL} get node "$node" \
+        -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}:{.lastHeartbeatTime}{end}' 2>/dev/null) || return 1
+    # Ignore a Ready status left over from before the container restart.
+    [[ "${state%%:*}" = "True" && "${state#*:}" > "$restarted_at" ]]
+}
+
 # --- SNR mode ---
 
 # Return the UID of the current SelfNodeRemediation CR for a node, or empty string.
@@ -279,7 +291,11 @@ while true; do
         # Skip nodes already being rebooted
         if echo " $REBOOTING " | grep -qF " $node "; then
             # Check if reboot completed (node Ready again)
-            if is_node_ready "$node"; then
+            if { [ "$MODE" = "sbr" ] && is_sbr_node_recovered "$node"; } || \
+               { [ "$MODE" = "snr" ] && is_node_ready "$node"; }; then
+                if [ "$MODE" = "sbr" ]; then
+                    rm -f "$SBR_HANDLED_DIR/$node.restarted"
+                fi
                 log "$node: node is Ready again, reboot complete."
                 REBOOTING=$(echo "$REBOOTING" | tr ' ' '\n' | grep -vxF "$node" | tr '\n' ' ')
             fi
@@ -321,10 +337,16 @@ while true; do
                     if [ -n "$fencing_uid" ]; then
                         touch "$SBR_HANDLED_DIR/$fencing_uid"
                     fi
-                    ${CONTAINER_TOOL} restart "$node" >/dev/null 2>&1 || true
+                    if ! ${CONTAINER_TOOL} restart "$node" >/dev/null 2>&1; then
+                        log "$node: container restart failed; keeping node in progress."
+                        exit 1
+                    fi
+                    restarted_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                     # Re-create the per-node null watchdog device (lost on container restart).
                     ${CONTAINER_TOOL} exec "$node" sh -c 'rm -f /dev/watchdog; mknod /dev/watchdog c 1 3' 2>/dev/null || true
                     log "$node: container restarted, waiting for kubelet to return."
+                    printf '%s\n' "$restarted_at" > "$SBR_HANDLED_DIR/$node.restarted.tmp"
+                    mv "$SBR_HANDLED_DIR/$node.restarted.tmp" "$SBR_HANDLED_DIR/$node.restarted"
                 ) &
             fi
 
