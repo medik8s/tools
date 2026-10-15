@@ -277,6 +277,7 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 | `dev-simulate-storm` | Stop kubelet on 2 workers |
 | `dev-simulate-network` | Block API server from a worker |
 | `dev-recover` | Recover all workers and clean up |
+| `dev-rbac-check` | Verify RBAC correctness for non-OLM deployment |
 | `dev-help` | Show all dev targets |
 
 ## Using an Existing Cluster (OCP, etc.)
@@ -339,6 +340,30 @@ commands to run instead of executing them directly (safety first). Set
 | FAR | Real fencing on Kind via `fence_kind` (`SETUP_DOCKER_SOCKET=true`) | `fence_kind` power-cycles worker Kind containers over the host Docker socket. Run with `SETUP_DOCKER_SOCKET=true make dev-setup`. `fence_kind` is present only in the e2e image, not the shipped operator image. |
 | MDR | Direct MDR E2E with simulated Machine replacement | Use `SETUP_MDR_MOCK=true make dev-setup` with `MDR_CRD_DIR` set to the Machine API manifests to install the CRDs and prepare fixtures. From MDR, run `make dev-olm-deploy dev-wait`, supervise the one-shot watcher around `E2E_KIND=true make e2e-test`, then use `make dev-teardown`. The test target only runs Go tests; CI and the local runner own the watcher lifecycle. See [MDR simulation](kind-mdr.md). |
 | SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
+
+## RBAC Verification
+
+OLM silently promotes namespace-scoped Roles to ClusterRoles when using
+AllNamespaces install mode. Since `dev-deploy` uses raw kustomize (no OLM),
+it applies RBAC manifests as-is — exposing mismatches between namespace-scoped
+permissions and cluster-scoped runtime behavior.
+
+Run `make dev-rbac-check` after deploying operators to detect these issues:
+
+```bash
+make dev-deploy
+make dev-rbac-check
+```
+
+Known bug classes this checks:
+- **Secret cache** (INFO): operators use namespace-scoped Secret RBAC.
+  Cluster-scoped Secret access should NOT be granted — controller-runtime cache
+  bypass makes it unnecessary. Reported as INFO (expected: not granted).
+  See [fence-agents-remediation#217](https://github.com/medik8s/fence-agents-remediation/issues/217).
+- **Events on cluster-scoped objects** (FAIL): client-go emits events in the
+  default namespace for Nodes/NodeMaintenance, but events RBAC is only in the
+  namespace-scoped leader election Role
+  ([node-healthcheck-operator#429](https://github.com/medik8s/node-healthcheck-operator/pull/429))
 
 ## Limitations
 
