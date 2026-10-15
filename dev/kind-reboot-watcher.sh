@@ -173,6 +173,12 @@ log() { echo "$(date -u +%H:%M:%S) [reboot-watcher/$MODE] $*"; }
 # Track nodes that are currently being "rebooted" to avoid double-restart (space-separated list)
 REBOOTING=""
 
+if [ "$MODE" = "sbr" ]; then
+    # Background handlers share the UIDs already used for restart attempts.
+    SBR_HANDLED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sbr-reboot-watcher.XXXXXX")
+    trap 'rm -rf "$SBR_HANDLED_DIR"' EXIT
+fi
+
 log "watching Kind cluster '${CLUSTER_NAME}' (timeout: ${REBOOT_DELAY}s, tool: ${CONTAINER_TOOL})"
 if [ "$MODE" = "snr" ]; then
     log "will wait for SelfNodeRemediation CR before restarting nodes."
@@ -191,6 +197,18 @@ is_node_ready() {
     local status
     status=$(${KUBECTL} get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
     [[ "$status" == "True" ]]
+}
+
+is_sbr_node_recovered() {
+    local node="$1"
+    local restarted_at state
+    # The handler publishes this only after the restart and watchdog setup finish.
+    [ -f "$SBR_HANDLED_DIR/$node.restarted" ] || return 1
+    restarted_at=$(cat "$SBR_HANDLED_DIR/$node.restarted")
+    state=$(${KUBECTL} get node "$node" \
+        -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}:{.lastHeartbeatTime}{end}' 2>/dev/null) || return 1
+    # Ignore a Ready status left over from before the container restart.
+    [[ "${state%%:*}" = "True" && "${state#*:}" > "$restarted_at" ]]
 }
 
 # --- SNR mode ---
@@ -233,25 +251,26 @@ get_sbr_cr_fencing_state() {
         2>/dev/null || true
 }
 
-# Wait until a NEW StorageBasedRemediation CR (different UID from baseline) reaches
-# FencingSucceeded=True, or until timeout.
+# Wait for an unhandled CR to reach FencingSucceeded=True. Return its UID on
+# stdout, including the last observed UID on timeout, to record the restart attempt.
 wait_for_fencing() {
     local node="$1"
     local timeout="$2"
-    local baseline_uid="$3"
     local elapsed=0
+    local state uid="" fencing_status
 
     while [ "$elapsed" -lt "$timeout" ]; do
-        local state uid fencing_status
         state=$(get_sbr_cr_fencing_state "$node")
         uid="${state%%:*}"
         fencing_status="${state#*:}"
-        if [ -n "$uid" ] && [ "$uid" != "$baseline_uid" ] && [ "$fencing_status" = "True" ]; then
+        if [ -n "$uid" ] && [ ! -e "$SBR_HANDLED_DIR/$uid" ] && [ "$fencing_status" = "True" ]; then
+            printf '%s\n' "$uid"
             return 0
         fi
         sleep "$CR_POLL_INTERVAL"
         elapsed=$((elapsed + CR_POLL_INTERVAL))
     done
+    printf '%s\n' "$uid"
     return 1
 }
 
@@ -272,7 +291,11 @@ while true; do
         # Skip nodes already being rebooted
         if echo " $REBOOTING " | grep -qF " $node "; then
             # Check if reboot completed (node Ready again)
-            if is_node_ready "$node"; then
+            if { [ "$MODE" = "sbr" ] && is_sbr_node_recovered "$node"; } || \
+               { [ "$MODE" = "snr" ] && is_node_ready "$node"; }; then
+                if [ "$MODE" = "sbr" ]; then
+                    rm -f "$SBR_HANDLED_DIR/$node.restarted"
+                fi
                 log "$node: node is Ready again, reboot complete."
                 REBOOTING=$(echo "$REBOOTING" | tr ' ' '\n' | grep -vxF "$node" | tr '\n' ' ')
             fi
@@ -304,20 +327,26 @@ while true; do
                     log "$node: container restarted, waiting for kubelet..."
                 ) &
             else
-                # Capture baseline UID so a stale FencingSucceeded from a prior remediation
-                # does not prematurely trigger a restart for the current one.
-                local_baseline_uid=$(get_sbr_cr_fencing_state "$node"); local_baseline_uid="${local_baseline_uid%%:*}"
-                log "$node: waiting for FencingSucceeded=True on new CR (baseline UID: ${local_baseline_uid:-none}, timeout: ${REBOOT_DELAY}s)..."
+                log "$node: waiting for FencingSucceeded=True on an unhandled CR (timeout: ${REBOOT_DELAY}s)..."
                 (
-                    if wait_for_fencing "$node" "$REBOOT_DELAY" "$local_baseline_uid"; then
+                    if fencing_uid=$(wait_for_fencing "$node" "$REBOOT_DELAY"); then
                         log "$node: FencingSucceeded=True, restarting container to complete reboot..."
                     else
                         log "$node: timeout waiting for FencingSucceeded, forcing restart..."
                     fi
-                    ${CONTAINER_TOOL} restart "$node" >/dev/null 2>&1 || true
+                    if [ -n "$fencing_uid" ]; then
+                        touch "$SBR_HANDLED_DIR/$fencing_uid"
+                    fi
+                    if ! ${CONTAINER_TOOL} restart "$node" >/dev/null 2>&1; then
+                        log "$node: container restart failed; keeping node in progress."
+                        exit 1
+                    fi
+                    restarted_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                     # Re-create the per-node null watchdog device (lost on container restart).
                     ${CONTAINER_TOOL} exec "$node" sh -c 'rm -f /dev/watchdog; mknod /dev/watchdog c 1 3' 2>/dev/null || true
                     log "$node: container restarted, waiting for kubelet to return."
+                    printf '%s\n' "$restarted_at" > "$SBR_HANDLED_DIR/$node.restarted.tmp"
+                    mv "$SBR_HANDLED_DIR/$node.restarted.tmp" "$SBR_HANDLED_DIR/$node.restarted"
                 ) &
             fi
 

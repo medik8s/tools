@@ -42,8 +42,11 @@ recheck for each newly unready worker. Once a worker qualifies,
 the watcher marks it as being handled so it does not
 start another restart job for the same node. Restart handling runs in a
 background process, so different failed workers can wait for their signals in
-parallel. The main process continues checking nodes and removes a node from
-its in-progress list once its `Ready` condition is `True` again.
+parallel. In SNR mode, the main process removes a node from its in-progress
+list once its `Ready` condition is `True` again. In SBR mode, it also requires
+the restart handler to finish and the Ready heartbeat to be newer than the
+completed container restart. This prevents an early or stale Ready status
+from allowing a second restart handler for the same failure.
 
 ## Remediation modes
 
@@ -67,10 +70,13 @@ mode does not recreate `/dev/watchdog` after restart.
 
 For the NotReady worker, the watcher looks for a
 `StorageBasedRemediation` object with a matching name across all namespaces.
-It records the current object's UID as a baseline and polls every five seconds
-for a new object whose `FencingSucceeded` condition has status `True`. Both
-parts must match: an old object that already says fencing succeeded is not
-enough.
+It polls every five seconds for an object whose `FencingSucceeded` condition
+has status `True` and whose UID has not been used for a restart attempt by this
+watcher. The object may already exist when the worker becomes NotReady.
+Handled UIDs are shared between background handlers for the watcher's lifetime,
+including the last observed UID when the timeout forces a restart. A handled
+object cannot trigger another immediate restart; the timeout fallback still
+applies. This history resets when the watcher exits.
 
 Waiting for fencing to succeed gives the victim's heartbeat time to age past
 the fencing threshold before the node agent resumes. Restarting too early
@@ -153,9 +159,9 @@ Restart command error handling differs by mode:
   background handler exits due to strict Bash error handling; the watcher does
   not retry that restart. The main process keeps the node marked in progress
   until it sees `Ready=True`.
-- SBR mode treats container restart and watchdog-device recreation as
-  best-effort commands. It attempts device recreation even if the restart
-  command failed.
+- SBR mode logs a failed container restart and keeps the node marked in
+  progress without retrying. Watchdog-device recreation after a successful
+  restart remains best effort.
 
 MDR waits indefinitely for a Machine deletion request; the caller must stop
 an idle watcher when tests finish. Replacement retains its fifteen-minute
@@ -268,10 +274,12 @@ action directly.
 - `is_node_ready`: reads the node's Ready condition through Kubernetes and
   succeeds only when it is `True`.
 - `get_snr_cr_uid` / `wait_for_remediation_cr`: find a fresh SNR object by UID.
-- `get_sbr_cr_fencing_state` / `wait_for_fencing`: find a fresh SBR object
+- `get_sbr_cr_fencing_state` / `wait_for_fencing`: find an unhandled SBR object
   with `FencingSucceeded=True`.
 - The main loop rechecks NotReady nodes after ten seconds, prevents duplicate
-  handling with `REBOOTING`, and clears that state when `Ready=True`.
+  handling with `REBOOTING`, and clears that state when `Ready=True`. SBR also
+  checks handler completion and a fresh Ready heartbeat with
+  `is_sbr_node_recovered`.
 - A background handler waits for the signal or timeout, restarts the
   container, and in SBR mode recreates the null watchdog device.
 
