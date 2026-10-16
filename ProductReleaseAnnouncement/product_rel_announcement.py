@@ -11,7 +11,7 @@ Usage:
 Options:
     -m, --markdown              Write the upstream (Google Group) announcement to release.md
     -w, --html                  Write the upstream (Google Group) announcement to release.html
-    -s, --slack                 Write the internal (Slack #forum-ocp-workload-availability) announcement to release-slack.txt
+    -s, --slack                 Write the internal (Slack) announcement to release-notes-<ver>.md
     --rhwa-version=<ver>        RHWA release version (e.g. 4.21-0), required with --slack
     --slack-changes=<file>      File with curated notable changes for Slack (one per line). Falls back to GitHub
     --operator=<ops>            Comma-separated operator keys to include (e.g. snr,far). Default: all
@@ -28,7 +28,7 @@ OPERATORS = [
     {"key": "snr", "name": "Self Node Remediation (SNR)", "repo": "self-node-remediation"},
     {"key": "far", "name": "Fence Agents Remediation (FAR)", "repo": "fence-agents-remediation"},
     {"key": "mdr", "name": "Machine Deletion Remediation (MDR)", "repo": "machine-deletion-remediation"},
-    {"key": "sbr", "name": "Storage Based Remediation (SBR)", "repo": "storage-based-remediation"},
+    {"key": "sbr", "name": "Storage-Based Remediation (SBR)", "repo": "storage-based-remediation"},
     {"key": "nmo", "name": "Node Maintenance Operator (NMO)", "repo": "node-maintenance-operator"},
 ]
 
@@ -77,15 +77,15 @@ def main():
             with open(arguments['--slack-changes'], 'r', encoding='utf-8') as f:
                 curated_changes = [line.strip() for line in f if line.strip()]
         slack = build_slack_template(releases, arguments['--rhwa-version'], curated_changes)
-        with open('release-slack.txt', 'w', encoding='utf-8') as f:
+        slack_file = f"release-notes-{arguments['--rhwa-version']}.md"
+        with open(slack_file, 'w', encoding='utf-8') as f:
             f.write(slack)
 
 
 def build_upstream_template(releases):
     lines = [
-        "On behalf of the Medik8s team, I am pleased to announce a new round of releases",
-        "for our operators. All releases are now available on the Kubernetes OperatorHub",
-        "and OKD.",
+        "The Medik8s team is pleased to announce a new round of releases for our operators.",
+        "All releases are now available on the Kubernetes OperatorHub and OKD.",
         "",
         "The release consists of these operators:",
         "",
@@ -98,7 +98,8 @@ def build_upstream_template(releases):
         lines.append(r['link'])
         lines.append("")
     lines.append("For more, visit our website https://www.medik8s.io/, contribute on GitHub")
-    lines.append("https://github.com/medik8s, and DM for more.")
+    lines.append("https://github.com/medik8s, join our mailing list https://groups.google.com/g/medik8s,")
+    lines.append("and follow us on LinkedIn https://www.linkedin.com/company/medik8s.")
     lines.append("")
     return "\n".join(lines)
 
