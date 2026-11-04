@@ -489,7 +489,7 @@ dev-olm-deploy: dev-olm-build-push ## Install the source bundle with operator-sd
 			security.openshift.io/scc.podSecurityLabelSync=false; \
 	fi
 	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" cleanup "$(DEV_OLM_PACKAGE_NAME)" --delete-all >/dev/null 2>&1 || true
-	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle "$(DEV_OLM_BUNDLE_IMAGE)" \
+	"$(DEV_OLM_OPERATOR_SDK)" -n "$(DEV_OLM_OPERATOR_NAMESPACE)" run bundle "$(DEV_OLM_BUNDLE_IMAGE)" --timeout 5m \
 		--install-mode="$(DEV_OLM_INSTALL_MODE)" --security-context-config="$(DEV_OLM_SECURITY_CONTEXT_CONFIG)" \
 		$(if $(filter registry,$(DEV_REGISTRY)),--use-http)
 
