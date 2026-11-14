@@ -14,9 +14,11 @@ the device and PV between test runs.
 
 ## Usage
 
-Prerequisites: native Linux, Kind, kubectl, Go, util-linux (`losetup`), and either root or passwordless sudo for loop-device operations. 
-Supported container engines: local rootful Docker, or local Podman. 
-Docker Desktop, Podman Machine (macOS/Windows), remote engines, and rootless Docker are unsupported. (Rootless Podman is supported via dynamic device ownership).
+On Linux, prerequisites are Kind, kubectl, Go, Python 3, and util-linux (`losetup`).
+Device operations require root or passwordless sudo.
+Supported engines are local rootful Docker and local Podman. Rootless Podman is supported through device ownership changes.
+On macOS, use the Podman Machine wrapper below.
+Docker Desktop, Windows, remote engines outside that wrapper, and rootless Docker are unsupported.
 
 From an operator repository whose Makefile includes `dev/dev.mk`:
 
@@ -43,11 +45,11 @@ The default worker count is three. `KIND_BLOCK_WORKERS` accepts integers of at l
 `KIND_HA=true` adds three control planes and preserves the requested worker count.
 Shared mode rejects `KIND_BLOCK_WORKERS`.
 
-Private mode requires native Linux and a local rootful Docker or Podman engine.
+Private mode executes inside Linux with a local rootful Docker or Podman engine.
 It also requires `python3`, `truncate`, `losetup`, `blockdev`, and `dmsetup`.
 The kernel must provide the device-mapper `linear` and `error` targets.
 Device commands require root or passwordless sudo.
-Use a native Linux environment when the development host runs macOS.
+On macOS, the wrapper executes these commands inside Podman Machine.
 Private mode rejects remote engines, rootless engines, and `SKIP_KIND=true`.
 
 Each worker receives a separate 64 MiB image, direct-I/O loop device, and device-mapper mapping.
@@ -67,7 +69,8 @@ export KIND_BLOCK_WORKERS=3
 export KIND_BLOCK_STATE_DIR="$PWD/dist/private-block-dev"
 export KUBECONFIG="$KIND_BLOCK_STATE_DIR/kubeconfig"
 export SKIP_REGISTRY=true
-sudo modprobe loop dm_mod
+sudo modprobe loop
+sudo modprobe dm_mod
 make dev-setup
 kubectl get pv,sc
 ```
@@ -169,3 +172,83 @@ The helper preserves such files instead of inferring ownership from their names.
 The private workflow checks real binding, direct I/O, faults, replacement claims, and cleanup on Linux.
 Mocked tests check command sequences and failure handling on macOS and Linux.
 Neither test qualifies SBR reboot evidence, hardware watchdogs, CSI behavior, or KubeVirt isolation.
+
+## macOS with Podman Machine
+
+Both Block modes can execute inside an existing rootful Podman Machine.
+The macOS host needs Podman, Python 3, and SSH.
+Install kubectl on macOS to inspect workloads from the host.
+The wrapper starts a stopped machine. It does not create, resize, replace, or reboot the machine.
+Set `KIND_BLOCK_MACHINE` when more than one machine exists.
+
+The wrapper installs missing Linux tools inside the VM.
+It downloads Kind v0.33.0, kubectl v1.35.0, and Go 1.26.0 when those tools are absent.
+It checks each download against its published SHA256 checksum.
+Missing system tools use the guest package manager. Fedora CoreOS uses `rpm-ostree --apply-live`.
+Preparation stops if the tools or kernel features remain unavailable.
+No macOS `modprobe` command is required.
+
+The wrapper also prepares loop device nodes inside its Kind workers.
+Kubelet uses additional loop devices when it maps raw Block volumes.
+The prepared range includes 256 numbers above the highest loop number present at setup.
+New loop numbers outside that range require fixture recreation.
+Recreate the fixture after a worker container restarts, because the restart can remove these device nodes.
+
+Run these commands from the `tools` repository:
+
+```bash
+export CONTAINER_TOOL=podman
+export KIND_BLOCK_MACHINE=medik8s
+export MEDIK8S_CLUSTER_NAME=mac-block-dev
+export KIND_BLOCK_STORAGE=true
+export KIND_BLOCK_MODE=shared
+unset KIND_BLOCK_WORKERS
+export KIND_BLOCK_STATE_DIR="$PWD/dist/mac-block-dev"
+export KUBECONFIG="$KIND_BLOCK_STATE_DIR/kubeconfig"
+export SKIP_REGISTRY=true
+
+bash dev/setup.sh --skip-olm
+kubectl get pv,sc
+```
+
+For private devices, use a separate cluster and state directory:
+
+```bash
+export MEDIK8S_CLUSTER_NAME=mac-private-block-dev
+export KIND_BLOCK_MODE=per-node
+export KIND_BLOCK_WORKERS=3
+export KIND_BLOCK_STATE_DIR="$PWD/dist/mac-private-block-dev"
+export KUBECONFIG="$KIND_BLOCK_STATE_DIR/kubeconfig"
+
+bash dev/setup.sh --skip-olm
+python3 dev/kind_block_machine.py exec -- python3 dev/tests/kind_block_per_node_smoke.py
+```
+
+Setup, teardown, and private fault and reclaim commands select the wrapper automatically on macOS.
+Keep the same environment for each command.
+`SKIP_REGISTRY=true` applies inside the VM. The wrapper does not configure an operator image registry.
+
+Backing files and device records stay inside the VM.
+The local `machine.json` records the machine identity and guest directory identifier.
+The local kubeconfig uses a loopback SSH tunnel to the guest API server.
+If the tunnel stops, restore it with:
+
+```bash
+python3 dev/kind_block_machine.py connect
+```
+
+Execute commands that need guest device records through `exec --`.
+The wrapper sets the guest state directory and kubeconfig for those commands.
+Guest smoke artifacts remain under the recorded guest directory.
+
+To remove the fixture:
+
+```bash
+make dev-teardown
+python3 dev/kind_block_machine.py verify-clean
+```
+
+Teardown removes the fixture cluster and devices before it stops the API tunnel.
+It preserves records after a cleanup error so that the same command can retry.
+It refuses to use a replacement VM with the same name.
+It does not remove guest tools, other clusters, or the Podman Machine.

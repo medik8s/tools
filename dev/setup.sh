@@ -9,6 +9,9 @@ set -euo pipefail
 SETUP_ARGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${KIND_BLOCK_STORAGE:-false}" == true && $(uname -s) == Darwin ]]; then
+    exec python3 "$SCRIPT_DIR/kind_block_machine.py" setup -- "$@"
+fi
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
@@ -87,8 +90,9 @@ while [[ $# -gt 0 ]]; do
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
             echo "  KIND_BLOCK_STORAGE        Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
-            echo "  KIND_BLOCK_MODE           shared (default) or per-node (native rootful Linux)"
+            echo "  KIND_BLOCK_MODE           shared (default) or per-node (rootful Linux or macOS Podman Machine)"
             echo "  KIND_BLOCK_WORKERS        Private worker count, at least 3 (default: 3)"
+            echo "  KIND_BLOCK_MACHINE        Rootful Podman Machine for Block fixtures on macOS"
             echo "  KIND_BLOCK_STATE_DIR      Absolute directory for block state and isolated kubeconfig"
             exit 0
             ;;

@@ -609,6 +609,9 @@ class Fixture:
                 if mapping:
                     self.require(loops, "A mapping exists without its backing loop device.")
                     self.validate_worker(worker, cluster=False)
+                    self.privileged("python3", str(Path(__file__).with_name("kind_block_references.py")),
+                                    f"/dev/mapper/{worker['map']}")
+                    mapping = self.mapping(worker)
                     self.require(mapping["open"] == 0, "The mapping is busy.")
                     self.privileged("dmsetup", "remove", worker["map"])
                     self.require(self.mapping(worker) is None, "Device-mapper removal is incomplete.")
@@ -676,6 +679,10 @@ class Fixture:
 
 
 def main():
+    if command(["uname", "-s"]) == "Darwin":
+        from kind_block_machine import main as machine_main
+        return machine_main()
+
     def interrupted(signum, frame):
         signal.signal(signum, signal.SIG_IGN)
         raise FixtureError(f"Fixture operation interrupted by signal {signum}.")

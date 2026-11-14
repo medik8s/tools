@@ -101,6 +101,7 @@ export MEDIK8S_CLUSTER_NAME
 export MEDIK8S_NAMESPACE
 export KIND_BLOCK_STORAGE
 export KIND_BLOCK_MODE
+export KIND_BLOCK_MACHINE
 ifneq ($(origin KIND_BLOCK_WORKERS),undefined)
 export KIND_BLOCK_WORKERS
 endif
@@ -784,7 +785,8 @@ dev-help: ## Show dev environment help
 	@echo "  DEV_REGISTRY=ttl.sh         Push to ttl.sh (default for external clusters)"
 	@echo "  SKIP_KIND=true              Use existing cluster instead of creating Kind"
 	@echo "  KIND_BLOCK_STORAGE=true     Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
-	@echo "  KIND_BLOCK_MODE=per-node    Use one private RWO Block PV per worker (native rootful Linux)"
+	@echo "  KIND_BLOCK_MODE=per-node    Use one private RWO Block PV per worker"
+	@echo "  KIND_BLOCK_MACHINE=name     Run Block fixtures in a rootful Podman Machine on macOS"
 	@echo "  KIND_BLOCK_WORKERS=3        Private worker count (at least 3)"
 	@echo "  make dev-kind-block-reclaim Prepare or reclaim a private PV (NODE, ACTION, NAMESPACE, POD)"
 	@echo "  make dev-kind-block-fault   Change one private device (NODE, ACTION=error|hang|restore)"

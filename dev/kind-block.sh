@@ -47,7 +47,7 @@ kind_block_check_host() {
     }
     
     local cmd endpoint security_options operating_system
-    for cmd in "$tool" losetup truncate; do command -v "$cmd" >/dev/null || return 1; done
+    for cmd in "$tool" losetup truncate python3; do command -v "$cmd" >/dev/null || return 1; done
     kind_sudo true
     
     if [[ "$tool" == "docker" ]]; then
@@ -159,13 +159,25 @@ kind_block_cleanup() {
     [[ -f "$KIND_BLOCK_STATE_DIR/owned" ]] || return 0
     # Called only AFTER Kind has removed every node. A failed lookup/detach
     # must preserve the backing file and ownership marker for a cleanup retry.
-    local devices device containers tool="${CONTAINER_TOOL:-docker}"
+    local devices device associated attempt containers tool="${CONTAINER_TOOL:-docker}"
     containers=$("$tool" ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER_NAME")
     [[ -z "$containers" ]] || { echo "Kind nodes still exist; refusing to detach block storage." >&2; return 1; }
     devices=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
     while read -r device; do
-        [[ -z "$device" ]] || kind_sudo losetup --detach "$device"
+        if [[ -n "$device" ]]; then
+            kind_sudo python3 "$SCRIPT_DIR/kind_block_references.py" "$device"
+            associated=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
+            if grep -Fxq -- "$device" <<< "$associated"; then
+                kind_sudo losetup --detach "$device"
+            fi
+        fi
     done <<< "$devices"
+    for ((attempt=0; attempt<50; attempt++)); do
+        devices=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
+        [[ -n "$devices" ]] || break
+        sleep 0.1
+    done
+    [[ -z "$devices" ]] || { echo "Loop detach is incomplete. Preserve the block fixture for retry." >&2; return 1; }
     rm -f "$KIND_BLOCK_STATE_DIR/block.img" "$KIND_BLOCK_STATE_DIR/loop-device" \
         "$KIND_BLOCK_STATE_DIR/owned" "$KIND_BLOCK_STATE_DIR/kubeconfig"
 }

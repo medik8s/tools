@@ -8,6 +8,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${KIND_BLOCK_STORAGE:-false}" == true && $(uname -s) == Darwin ]]; then
+    exec python3 "$SCRIPT_DIR/kind_block_machine.py" teardown -- "$@"
+fi
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 

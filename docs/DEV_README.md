@@ -8,7 +8,8 @@ For shared or private raw Block devices on Kind, see [Kind block storage](../dev
 Block devices require `KIND_BLOCK_STORAGE=true`.
 The default mode shares one device across two workers.
 `KIND_BLOCK_MODE=per-node` provides separate RWO Block devices for at least three workers.
-Private mode requires native Linux and a local rootful engine.
+Private mode requires Linux and a local rootful engine.
+On macOS, both Block modes run inside a rootful Podman Machine through the shared setup scripts.
 Replacement Pods require explicit PV reclamation.
 
 ```bash
@@ -323,6 +324,7 @@ commands to run instead of executing them directly (safety first). Set
 | `KIND_HA` | `false` | Set to `true` for HA cluster (3 CP + 3 workers, for SNR CP testing) |
 | `KIND_BLOCK_STORAGE` | `false` | Enable disposable Block devices for Kind. |
 | `KIND_BLOCK_MODE` | `shared` | Select shared RWX Block storage or private `per-node` RWO Block storage. |
+| `KIND_BLOCK_MACHINE` | Selected automatically when unambiguous | Podman Machine for Block fixtures on macOS. The wrapper installs missing guest tools and provides a host kubeconfig. |
 | `KIND_BLOCK_WORKERS` | `3` in private mode | Private worker count, at least three. Shared mode rejects this setting. HA preserves the requested private count. |
 | `KIND_BLOCK_STATE_DIR` | `$XDG_STATE_HOME/medik8s/kind-block/<cluster>` | Absolute fixture directory. The default base is `$HOME/.local/state` when `XDG_STATE_HOME` is absent. Use the same directory for all fixture commands. |
 | `SKIP_KIND` | `false` | Set to `true` to skip Kind creation (external cluster) |

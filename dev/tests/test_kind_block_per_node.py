@@ -51,6 +51,9 @@ class HostModel:
             args = args[2:]
         self.calls.append((args, timeout))
         tool, rest = args[0], args[1:]
+        if tool == "python3" and Path(rest[0]).name == "kind_block_references.py":
+            self.reject("references")
+            return ""
         if tool == "truncate":
             with open(rest[-1], "wb") as image:
                 image.truncate(64 * 1024 * 1024)
@@ -492,6 +495,20 @@ class PrivateFixture(unittest.TestCase):
         self.assertFalse(self.changes("dmsetup", "remove"))
         self.assertFalse(self.changes("losetup", "--detach"))
         self.assertTrue((self.fixture.directory / "owned").exists())
+
+    def test_failed_reference_cleanup_preserves_devices_and_retries(self):
+        self.ready()
+        self.host.fail.add("references")
+        with self.assertRaisesRegex(PRIVATE.FixtureError, "references"):
+            self.fixture.teardown()
+        self.assertFalse(self.changes("dmsetup", "remove"))
+        self.assertFalse(self.changes("losetup", "--detach"))
+        self.assertTrue((self.fixture.directory / "owned").exists())
+        self.assertTrue(all(Path(worker["image"]).exists() for worker in self.fixture.state["workers"]))
+        self.host.fail.remove("references")
+        self.fixture.teardown()
+        self.assertFalse(self.host.loops)
+        self.assertFalse(self.host.mappings)
 
     def test_failed_node_removal_preserves_devices(self):
         self.ready()
