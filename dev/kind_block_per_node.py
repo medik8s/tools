@@ -355,6 +355,7 @@ class Fixture:
                           container_id=json.loads(self.run(self.tool, "inspect", worker["node"]))[0]["Id"])
             self.save()
             self.validate_worker(worker)
+        self.prepare_loop_nodes()
         manifests = [{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass",
                       "metadata": {"name": STORAGE_CLASS, "labels": {LABEL: self.state["id"]}},
                       "provisioner": "kubernetes.io/no-provisioner", "volumeBindingMode": "WaitForFirstConsumer"}]
@@ -378,6 +379,43 @@ class Fixture:
         self.state["phase"] = "Ready"
         self.save()
         print(f"Private raw Block storage ready: {len(self.state['workers'])} workers, StorageClass {STORAGE_CLASS}.")
+
+    def prepare_loop_nodes(self):
+        # Kubelet takes a loop-device reference for every raw Block volume it
+        # maps (util.MapBlockVolume runs `losetup -f` inside the Kind node).
+        # A worker's /dev is created once at container start, so loop devices
+        # the kernel registers later - including every fd-lock loop kubelet
+        # allocates - have no node there and consumer Pods stay in
+        # ContainerCreating. Ensure a node exists for every possible minor:
+        # the major and the max_part minor shift come from the kernel, not
+        # from host tooling.
+        script = r'''
+limit=255
+for entry in /sys/block/loop*; do
+    index=${entry##*/loop}
+    [[ $index =~ ^[0-9]+$ ]] || continue
+    (( index + 256 <= limit )) || limit=$((index + 256))
+done
+parts=$(cat /sys/module/loop/parameters/max_part)
+shift=0
+while (( parts > 0 )); do
+    shift=$((shift + 1))
+    parts=$((parts >> 1))
+done
+for ((index=0; index<=limit; index++)); do
+    path=/dev/loop$index
+    minor=$((index << shift))
+    if [[ -e "$path" || -L "$path" ]]; then
+        [[ -b "$path" && ! -L "$path" ]] || exit 1
+        expected=$(printf "7:%x" "$minor")
+        [[ $(stat -c "%t:%T" "$path") == "$expected" ]] || exit 1
+    else
+        mknod -m 0600 "$path" b 7 "$minor"
+    fi
+done
+'''
+        for worker in self.state["workers"]:
+            self.run(self.tool, "exec", worker["container_id"], "bash", "-ceu", script)
 
     def worker(self, node):
         workers = [w for w in self.state["workers"] if w["node"] == node]

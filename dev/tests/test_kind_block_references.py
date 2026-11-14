@@ -70,8 +70,34 @@ class ReferenceCleanupTests(unittest.TestCase):
 
                     with patch.object(references, "Path", side_effect=path):
                         with patch.object(Path, "stat", autospec=True, side_effect=device_stat):
-                            with self.assertRaisesRegex(RuntimeError, "Unexpected loop device"):
-                                list(references.loop_devices())
+                            with patch.object(references.os, "mknod"):
+                                with self.assertRaisesRegex(RuntimeError, "Unexpected loop device"):
+                                    list(references.loop_devices())
+
+    def test_loop_discovery_creates_missing_device_nodes(self):
+        self.source_stat.stop()
+        with tempfile.TemporaryDirectory(prefix="kind-block-reference-test-", dir="/tmp") as directory:
+            root = Path(directory)
+            entry = root / "sys" / "loop7"
+            (entry / "loop").mkdir(parents=True)
+            (entry / "loop" / "backing_file").touch()
+            (entry / "dev").write_text("7:7\n")
+            (root / "dev").mkdir()
+
+            def path(value):
+                return root / ("sys" if value == "/sys/block" else "dev")
+
+            def device_stat(p, *args, **kwargs):
+                if p == root / "dev" / "loop7":
+                    return SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(7, 7))
+                return self.real_stat(p, *args, **kwargs)
+
+            with patch.object(references, "Path", side_effect=path):
+                with patch.object(Path, "stat", autospec=True, side_effect=device_stat):
+                    with patch.object(references.os, "mknod") as mknod:
+                        self.assertEqual(list(references.loop_devices()), [root / "dev" / "loop7"])
+            mknod.assert_called_once_with(root / "dev" / "loop7",
+                                           0o600 | stat.S_IFBLK, os.makedev(7, 7))
 
     def test_only_exact_backing_device_references_are_released(self):
         paths = [Path("/dev/loop7"), Path("/dev/loop8"), Path("/dev/loop9")]

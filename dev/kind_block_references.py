@@ -20,6 +20,10 @@ def loop_devices():
             continue
         path = Path("/dev") / entry.name
         major, minor = map(int, (entry / "dev").read_text().strip().split(":"))
+        if not path.exists() and not path.is_symlink():
+            # Hosts that materialize /dev/loop* nodes only for attached loops
+            # leave the very loops this tool must release without a node.
+            os.mknod(path, 0o600 | stat.S_IFBLK, os.makedev(major, minor))
         device = path.stat()
         if not stat.S_ISBLK(device.st_mode) or device.st_rdev != os.makedev(major, minor):
             raise RuntimeError(f"Unexpected loop device: {path}")
