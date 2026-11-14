@@ -52,6 +52,11 @@ Device commands require root or passwordless sudo.
 On macOS, the wrapper executes these commands inside Podman Machine.
 Private mode rejects remote engines, rootless engines, and `SKIP_KIND=true`.
 
+Setup also creates missing `/dev/loop*` device nodes inside each worker.
+Kubelet holds a loop-device reference for every raw Block volume it maps,
+and hosts that create those nodes only for attached loops would otherwise
+leave consumer Pods in `ContainerCreating`.
+
 Each worker receives a separate 64 MiB image, direct-I/O loop device, and device-mapper mapping.
 Only its assigned worker receives that mapping at `/dev/medik8s-kind-block`.
 Control planes receive no fixture devices.

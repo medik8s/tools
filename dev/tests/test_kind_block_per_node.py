@@ -388,6 +388,20 @@ class PrivateFixture(unittest.TestCase):
             self.assertEqual(pv["spec"]["nodeAffinity"]["required"]["nodeSelectorTerms"], [{
                 "matchExpressions": [{"key": "kubernetes.io/hostname", "operator": "In", "values": [worker["node"]]}]}])
 
+    def test_install_provisions_loop_nodes_before_pv_creation(self):
+        workers = self.ready()
+        prepared = [args for args, _ in self.host.calls
+                    if args[:2] == [self.fixture.tool, "exec"] and "mknod" in args[-1]]
+        self.assertEqual({args[2] for args in prepared}, {w["container_id"] for w in workers})
+        for args in prepared:
+            self.assertIn("/sys/module/loop/parameters/max_part", args[-1])
+            self.assertIn("bash", args[3:5])
+        storage_create = next(i for i, (args, _) in enumerate(self.host.calls)
+                              if args[:1] == ["kubectl"] and "create" in args)
+        self.assertLess(max(i for i, (args, _) in enumerate(self.host.calls)
+                            if args[:2] == [self.fixture.tool, "exec"] and "mknod" in args[-1]),
+                        storage_create)
+
     def test_failed_pv_install_keeps_device_records_for_cleanup(self):
         self.allocate()
         self.host.nodes_exist = True
