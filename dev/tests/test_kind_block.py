@@ -12,6 +12,7 @@ set -eu
 tool=${0##*/}
 printf '%s %s\n' "$tool" "$*" >> "$MOCK_ROOT/calls"
 case "$tool" in
+  uname) echo Linux ;;
   id) echo 1000 ;;
   sudo) [[ "${1:-}" != -n ]] || shift; exec "$@" ;;
   docker)
@@ -85,7 +86,7 @@ class KindBlockLifecycle(unittest.TestCase):
         self.state = self.root / "state"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for name in ["id", "sudo", "docker", "losetup", "kind", "kubectl", "go", "podman", "chown"]:
+        for name in ["id", "sudo", "docker", "losetup", "kind", "kubectl", "go", "podman", "chown", "uname"]:
             path = self.bin / name
             path.write_text(MOCK)
             path.chmod(0o755)

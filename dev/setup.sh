@@ -6,6 +6,7 @@
 # Usage: ./setup.sh [--skip-olm] [--skip-registry] [--name <cluster-name>]
 
 set -euo pipefail
+SETUP_ARGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
@@ -16,7 +17,7 @@ CLUSTER_NAME="${MEDIK8S_CLUSTER_NAME:-medik8s-dev}"
 # their own namespaces (from kustomization.yaml), not this one.
 DEV_NS="${MEDIK8S_NAMESPACE:-medik8s-system}"
 INSTALL_OLM=true
-SKIP_KIND=false
+SKIP_KIND="${SKIP_KIND:-false}"
 SKIP_INOTIFY_CHECK=false
 SKIP_REGISTRY="${SKIP_REGISTRY:-false}"
 REG_NAME="${MEDIK8S_REGISTRY_NAME:-kind-registry}"
@@ -86,6 +87,8 @@ while [[ $# -gt 0 ]]; do
             echo "  SKIP_REGISTRY             Set to 'true' to skip local registry creation"
             echo "  KIND_HA                   Set to 'true' for HA config (3 CP + 3 workers)"
             echo "  KIND_BLOCK_STORAGE        Share a disposable raw block device across 2 workers (Linux/Docker or Podman)"
+            echo "  KIND_BLOCK_MODE           shared (default) or per-node (native rootful Linux)"
+            echo "  KIND_BLOCK_WORKERS        Private worker count, at least 3 (default: 3)"
             echo "  KIND_BLOCK_STATE_DIR      Absolute directory for block state and isolated kubeconfig"
             exit 0
             ;;
@@ -119,8 +122,15 @@ if [ "${KIND_BLOCK_STORAGE}" = true ]; then
         exit 1
     fi
     source "${SCRIPT_DIR}/kind-block.sh"
+    kind_block_settings
+    export MEDIK8S_CLUSTER_NAME="$CLUSTER_NAME" KIND_HA CONTAINER_TOOL KUBECTL
+    if [[ "$KIND_BLOCK_MODE" == per-node && -z "${_MEDIK8S_KIND_BLOCK_SESSION:-}" ]]; then
+        exec python3 "$SCRIPT_DIR/kind_block_per_node.py" setup -- "${SETUP_ARGS[@]}"
+    fi
     kind_block_state
-    kind_block_check_host
+    if [[ "$KIND_BLOCK_MODE" == shared ]]; then
+        kind_block_check_host
+    fi
 fi
 
 # Check prerequisites

@@ -4,9 +4,12 @@ A shared, consistent development environment for all medik8s operators.
 
 ## Quick Start
 
-For a lightweight shared raw block device on Kind, see
-[Kind block storage](../dev/kind-block.md). It is opt-in and does not change the default
-cluster setup.
+For shared or private raw Block devices on Kind, see [Kind block storage](../dev/kind-block.md).
+Block devices require `KIND_BLOCK_STORAGE=true`.
+The default mode shares one device across two workers.
+`KIND_BLOCK_MODE=per-node` provides separate RWO Block devices for at least three workers.
+Private mode requires native Linux and a local rootful engine.
+Replacement Pods require explicit PV reclamation.
 
 ```bash
 # One-time: add the dev environment snippet to your operator's Makefile
@@ -254,6 +257,8 @@ kubectl get selfnoderemediation -A -w    # watch SNR CR + automatic reboot
 |--------|-------------|
 | `dev-setup` | Create Kind cluster with all dependencies (`SKIP_KIND=true` for external cluster, `KIND_HA=true` for 3 CP + 3 workers) |
 | `dev-teardown` | Destroy Kind cluster and local registry (`KEEP_REGISTRY=true` preserves a shared registry) |
+| `dev-kind-block-reclaim` | Record or reclaim a private PV with `NODE`, `ACTION=prepare\|reclaim`, `NAMESPACE`, and `POD`. |
+| `dev-kind-block-fault` | Change one private mapping with `NODE` and `ACTION=error\|hang\|restore`. |
 | `dev-build` | Build operator image and load into Kind (or push to ttl.sh) |
 | `dev-deploy` | Build + install CRDs + deploy + configure cert-manager |
 | `dev-redeploy` | Rebuild and restart (deletes pods to pick up new image) |
@@ -316,6 +321,10 @@ commands to run instead of executing them directly (safety first). Set
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KIND_HA` | `false` | Set to `true` for HA cluster (3 CP + 3 workers, for SNR CP testing) |
+| `KIND_BLOCK_STORAGE` | `false` | Enable disposable Block devices for Kind. |
+| `KIND_BLOCK_MODE` | `shared` | Select shared RWX Block storage or private `per-node` RWO Block storage. |
+| `KIND_BLOCK_WORKERS` | `3` in private mode | Private worker count, at least three. Shared mode rejects this setting. HA preserves the requested private count. |
+| `KIND_BLOCK_STATE_DIR` | `$XDG_STATE_HOME/medik8s/kind-block/<cluster>` | Absolute fixture directory. The default base is `$HOME/.local/state` when `XDG_STATE_HOME` is absent. Use the same directory for all fixture commands. |
 | `SKIP_KIND` | `false` | Set to `true` to skip Kind creation (external cluster) |
 | `DEV_REGISTRY` | `registry` (Kind) / `ttl.sh` (external) | Image delivery: `registry`, `local`, or `ttl.sh`. OLM bundles require a registry. |
 | `DEV_IMG` | auto-generated | Override to use a custom image name |
@@ -338,7 +347,7 @@ commands to run instead of executing them directly (safety first). Set
 | SNR | ~85% | Peer health, softdog watchdog, API check. No hardware watchdog. |
 | FAR | Real fencing on Kind via `fence_kind` (`SETUP_DOCKER_SOCKET=true`) | `fence_kind` power-cycles worker Kind containers over the host Docker socket. Run with `SETUP_DOCKER_SOCKET=true make dev-setup`. `fence_kind` is present only in the e2e image, not the shipped operator image. |
 | MDR | Direct MDR E2E with simulated Machine replacement | Use `SETUP_MDR_MOCK=true make dev-setup` with `MDR_CRD_DIR` set to the Machine API manifests to install the CRDs and prepare fixtures. From MDR, run `make dev-olm-deploy dev-wait`, supervise the one-shot watcher around `E2E_KIND=true make e2e-test`, then use `make dev-teardown`. The test target only runs Go tests; CI and the local runner own the watcher lifecycle. See [MDR simulation](kind-mdr.md). |
-| SBR | Filesystem-mode e2e | Run with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. Use `kind-reboot-watcher.sh --mode sbr` to simulate node reboots during fencing tests. Block-mode tests (Portworx/Ceph RBD) require real block storage. |
+| SBR | Filesystem E2E and Block fixtures | Run Filesystem E2E with `SETUP_NFS_RWX=true SETUP_NULL_DEVICE_WATCHDOG=true make dev-setup`. The Block fixtures check storage setup only. Private mode does not qualify SBR remediation, boot evidence, or production CSI behavior. |
 
 ## Limitations
 

@@ -5,7 +5,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+kind_block_settings() {
+    KIND_BLOCK_MODE=${KIND_BLOCK_MODE:-shared}
+    case "$KIND_BLOCK_MODE" in
+        shared)
+            [[ ! ${KIND_BLOCK_WORKERS+x} ]] || {
+                echo "KIND_BLOCK_WORKERS requires KIND_BLOCK_MODE=per-node." >&2; return 1;
+            }
+            ;;
+        per-node)
+            [[ ${KIND_BLOCK_WORKERS-3} =~ ^0*([3-9]|[1-9][0-9]+)$ ]] || {
+                echo "KIND_BLOCK_WORKERS must be an integer of at least 3." >&2; return 1;
+            }
+            ;;
+        *) echo "Unknown KIND_BLOCK_MODE: $KIND_BLOCK_MODE" >&2; return 1 ;;
+    esac
+    export KIND_BLOCK_MODE
+}
+
 kind_block_state() {
+    kind_block_settings
     [[ "$CLUSTER_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
         echo "Invalid Kind cluster name: $CLUSTER_NAME" >&2; return 1;
     }
@@ -14,7 +33,7 @@ kind_block_state() {
         echo "KIND_BLOCK_STATE_DIR must be an absolute path." >&2; return 1;
     }
     export KUBECONFIG="$KIND_BLOCK_STATE_DIR/kubeconfig"
-    if [[ -f "$KIND_BLOCK_STATE_DIR/owned" ]]; then
+    if [[ "$KIND_BLOCK_MODE" == shared && -f "$KIND_BLOCK_STATE_DIR/owned" ]]; then
         [[ $(cat "$KIND_BLOCK_STATE_DIR/owned") == "$CLUSTER_NAME" ]] || {
             echo "Block state belongs to another cluster." >&2; return 1;
         }
@@ -55,6 +74,11 @@ kind_block_check_host() {
 }
 
 kind_block_prepare() {
+    if [[ "$KIND_BLOCK_MODE" == per-node ]]; then
+        python3 "$SCRIPT_DIR/kind_block_per_node.py" allocate
+        KIND_CONFIG="$KIND_BLOCK_STATE_DIR/kind.yaml"
+        return
+    fi
     [[ ! -e "$KIND_BLOCK_STATE_DIR/owned" && ! -e "$KIND_BLOCK_STATE_DIR/block.img" ]] || {
         echo "Unfinished block environment: run dev-teardown with the same block settings first." >&2; return 1;
     }
@@ -108,12 +132,16 @@ EOF
 }
 
 kind_block_install() {
+    if [[ "$KIND_BLOCK_MODE" == per-node ]]; then
+        python3 "$SCRIPT_DIR/kind_block_per_node.py" install
+        return
+    fi
     local node nodes tool="${CONTAINER_TOOL:-docker}"
     [[ $(${KUBECTL} config current-context) == "kind-$CLUSTER_NAME" ]] || {
         echo "Refusing to install storage outside kind-$CLUSTER_NAME." >&2; return 1;
     }
     nodes=$(${KUBECTL} get nodes -l medik8s.io/kind-block=true -o name)
-    [[ $(wc -w <<< "$nodes") == 2 ]] || { echo "Expected two block-enabled workers." >&2; return 1; }
+    [[ $(wc -w <<< "$nodes") -eq 2 ]] || { echo "Expected two block-enabled workers." >&2; return 1; }
 
     for node in $nodes; do
         "$tool" exec "${node#node/}" test -e /dev/medik8s-kind-block || {

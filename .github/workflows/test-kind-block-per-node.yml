@@ -1,0 +1,118 @@
+name: Private Block Storage CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  kind-block-per-node:
+    name: Kind Private Block Storage Smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      TOOLS_DIR: ${{ github.workspace }}
+      MEDIK8S_CLUSTER_NAME: private-block-ci
+      CONTAINER_TOOL: docker
+      KIND_BLOCK_STORAGE: "true"
+      KIND_BLOCK_MODE: per-node
+      KIND_BLOCK_WORKERS: "3"
+      KIND_BLOCK_STATE_DIR: /tmp/medik8s-private-block-ci
+      KIND_BLOCK_SMOKE_ARTIFACTS: /tmp/medik8s-private-block-artifacts
+      KUBECONFIG: /tmp/medik8s-private-block-ci/kubeconfig
+      SKIP_REGISTRY: "true"
+      SETUP_NULL_DEVICE_WATCHDOG: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Prepare Linux block devices
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dmsetup util-linux
+          sudo modprobe loop
+          sudo modprobe dm_mod
+          sudo dmsetup targets
+          mkdir -p "${KIND_BLOCK_SMOKE_ARTIFACTS}"
+          docker info
+
+      - name: Run hermetic unit tests
+        run: python3 -m unittest discover -s dev/tests -v
+
+      - name: Create private block fixture
+        run: make dev-setup
+
+      - name: Check private binding, I/O, faults, and replacement
+        run: python3 dev/tests/kind_block_per_node_smoke.py
+
+      - name: Collect fixture diagnostics
+        if: ${{ always() }}
+        run: |
+          mkdir -p "${KIND_BLOCK_SMOKE_ARTIFACTS}"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+
+          artifacts = Path(os.environ["KIND_BLOCK_SMOKE_ARTIFACTS"])
+          state = Path(os.environ["KIND_BLOCK_STATE_DIR"])
+          if state.exists():
+              shutil.copytree(state, artifacts / "before-teardown", ignore=shutil.ignore_patterns("*.img", "kubeconfig"), dirs_exist_ok=True)
+          commands = {
+              "devices.txt": ["sudo", "-n", "dmsetup", "info", "-c"],
+              "tables.txt": ["sudo", "-n", "dmsetup", "table"],
+              "loops.json": ["sudo", "-n", "losetup", "--list", "--json"],
+              "containers.json": ["docker", "ps", "-a", "--format", "json"],
+          }
+          for name, command in commands.items():
+              try:
+                  result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+                  (artifacts / name).write_text(result.stdout + result.stderr)
+              except Exception as error:
+                  (artifacts / name).write_text(str(error))
+          PY
+
+      - name: Teardown private fixture
+        if: ${{ always() }}
+        run: |
+          set -o pipefail
+          make dev-teardown 2>&1 | tee "${KIND_BLOCK_SMOKE_ARTIFACTS}/teardown.log"
+
+      - name: Check cleanup
+        if: ${{ always() }}
+        run: |
+          set -o pipefail
+          python3 dev/kind_block_per_node.py verify-clean 2>&1 | tee "${KIND_BLOCK_SMOKE_ARTIFACTS}/verify-clean.log"
+
+      - name: Preserve cleanup records
+        if: ${{ always() }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+
+          state = Path(os.environ["KIND_BLOCK_STATE_DIR"])
+          if state.exists():
+              shutil.copytree(state, Path(os.environ["KIND_BLOCK_SMOKE_ARTIFACTS"]) / "after-teardown", ignore=shutil.ignore_patterns("*.img", "kubeconfig"), dirs_exist_ok=True)
+          PY
+
+      - name: Upload diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-private-block-diagnostics
+          path: /tmp/medik8s-private-block-artifacts

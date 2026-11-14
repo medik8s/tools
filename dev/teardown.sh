@@ -28,6 +28,15 @@ done
 
 if [ "${KIND_BLOCK_STORAGE:-false}" = true ]; then
     source "${SCRIPT_DIR}/kind-block.sh"
+    kind_block_settings
+    if [[ "$KIND_BLOCK_MODE" == per-node ]]; then
+        export MEDIK8S_CLUSTER_NAME="$CLUSTER_NAME" CONTAINER_TOOL KUBECTL
+        python3 "$SCRIPT_DIR/kind_block_per_node.py" teardown
+        if [[ "${KEEP_REGISTRY:-false}" != true ]] && ${CONTAINER_TOOL} inspect "${REG_NAME}" &>/dev/null; then
+            ${CONTAINER_TOOL} rm -f "${REG_NAME}"
+        fi
+        exit 0
+    fi
     kind_block_state
     # An unowned cluster must never be removed by fixture cleanup.
     if [ ! -f "$KIND_BLOCK_STATE_DIR/owned" ]; then
