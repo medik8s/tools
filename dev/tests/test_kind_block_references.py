@@ -89,6 +89,8 @@ class ReferenceCleanupTests(unittest.TestCase):
 
             def device_stat(p, *args, **kwargs):
                 if p == root / "dev" / "loop7":
+                    if not mknod.called:
+                        raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(p))
                     return SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(7, 7))
                 return self.real_stat(p, *args, **kwargs)
 
