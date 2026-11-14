@@ -91,7 +91,10 @@ class KindBlockLifecycle(unittest.TestCase):
             path.write_text(MOCK)
             path.chmod(0o755)
         self.env = dict(os.environ)
-        for key in ["DOCKER_HOST", "DOCKER_CONTEXT", "KIND_HA", "KUBECONFIG"]:
+        for key in [
+            "DOCKER_HOST", "DOCKER_CONTEXT", "KIND_HA", "KUBECONFIG",
+            "KIND_BLOCK_MODE", "KIND_BLOCK_WORKERS",
+        ]:
             self.env.pop(key, None)
         self.env.update(
             PATH=f"{self.bin}:{os.environ['PATH']}", MOCK_ROOT=str(self.root),
