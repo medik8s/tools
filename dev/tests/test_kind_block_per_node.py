@@ -84,6 +84,8 @@ class HostModel:
                 return "linear v1.0.0\nerror v1.0.0"
             if action == "info":
                 self.reject("mapping-query")
+                if not self.mappings:
+                    return "No devices found"
                 return "\n".join(f"{name}|{value['uuid']}|{value['open']}|"
                                  f"{'suspended' if value['suspended'] else 'active'}"
                                  for name, value in self.mappings.items())
@@ -499,13 +501,48 @@ class PrivateFixture(unittest.TestCase):
         self.assertFalse(self.changes("dmsetup", "remove"))
         self.assertFalse(self.changes("losetup", "--detach"))
 
+    def test_teardown_removes_last_mapping_and_repeats_cleanly(self):
+        workers = self.ready()
+        self.fixture.teardown()
+        self.assertFalse(self.host.mappings)
+        self.assertFalse(self.host.loops)
+        self.assertTrue(all(not Path(worker["image"]).exists() for worker in workers))
+        self.assertEqual(self.state()["phase"], "Cleaned")
+        self.assertFalse((self.fixture.directory / "owned").exists())
+        self.assertIsNone(self.fixture.mapping(workers[-1]))
+        self.fixture.teardown()
+        with mock.patch("builtins.print"):
+            self.fixture.verify_clean()
+
+    def test_mapping_rejects_malformed_query_results(self):
+        worker = self.allocate()[0]
+        for output in ["Unexpected query output", "No devices found\ninvalid row"]:
+            with self.subTest(output=output):
+                with mock.patch.object(self.fixture, "privileged", return_value=output):
+                    with self.assertRaisesRegex(PRIVATE.FixtureError, "Invalid device-mapper query result"):
+                        self.fixture.mapping(worker)
+
+    def test_teardown_refuses_failed_mapping_query(self):
+        self.ready()
+        self.host.fail.add("mapping-query")
+        with self.assertRaisesRegex(PRIVATE.FixtureError, "mapping-query"):
+            self.fixture.teardown()
+        self.assertTrue(self.host.mappings)
+        self.assertTrue(self.host.loops)
+        self.assertTrue((self.fixture.directory / "owned").exists())
+        self.assertFalse(self.changes("dmsetup", "remove"))
+        self.assertFalse(self.changes("losetup", "--detach"))
+
     def test_detach_failure_preserves_only_unfinished_device_for_retry(self):
         workers = self.ready()
-        self.host.fail.add("detach:1")
-        with self.assertRaisesRegex(PRIVATE.FixtureError, "detach:1"):
+        self.host.fail.add("detach:3")
+        with self.assertRaisesRegex(PRIVATE.FixtureError, "detach:3"):
             self.fixture.teardown()
-        self.assertTrue(Path(workers[0]["image"]).exists())
-        self.assertTrue(all(not Path(worker["image"]).exists() for worker in workers[1:]))
+        self.assertTrue(Path(workers[-1]["image"]).exists())
+        self.assertTrue(all(not Path(worker["image"]).exists() for worker in workers[:-1]))
+        self.assertFalse(self.host.mappings)
+        self.assertEqual(list(self.host.loops), [workers[-1]["image"]])
+        self.assertFalse(self.state()["workers"][-1].get("removed", False))
         self.assertTrue((self.fixture.directory / "owned").exists())
         self.host.fail.clear()
         self.fixture.teardown()

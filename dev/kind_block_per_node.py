@@ -243,6 +243,8 @@ class Fixture:
                      "Unexpected device-mapper identity.")
         output = self.privileged("dmsetup", "info", "--columns", "--noheadings",
                                  "--separator", "|", "-o", "name,uuid,open,suspended")
+        if output.strip() == "No devices found":
+            return None
         for line in output.splitlines():
             fields = [value.strip() for value in line.split("|")]
             self.require(len(fields) == 4, "Invalid device-mapper query result.")
