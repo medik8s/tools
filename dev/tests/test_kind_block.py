@@ -12,8 +12,13 @@ set -eu
 tool=${0##*/}
 printf '%s %s\n' "$tool" "$*" >> "$MOCK_ROOT/calls"
 case "$tool" in
+  uname) echo Linux ;;
   id) echo 1000 ;;
   sudo) [[ "${1:-}" != -n ]] || shift; exec "$@" ;;
+  python3)
+    [[ "$1" == */kind_block_references.py ]] || exit 1
+    [[ "${MOCK_REFERENCES_FAIL:-false}" != true ]] || exit 1
+    [[ "${MOCK_REFERENCES_AUTOCLEAR:-false}" != true ]] || touch "$MOCK_ROOT/detached" ;;
   docker)
     case "$*" in
       'context inspect'*) echo "${MOCK_ENDPOINT:-unix:///var/run/docker.sock}" ;;
@@ -32,11 +37,22 @@ case "$tool" in
     esac ;;
   losetup)
     case "$*" in
-      *--find*) echo /dev/loop999 ;;
+      *--find*) rm -f "$MOCK_ROOT/detached"; echo /dev/loop999 ;;
       *--associated*)
         [[ "${MOCK_LOOKUP_FAIL:-false}" != true ]] || exit 1
-        echo /dev/loop999 ;;
-      *--detach*) [[ "${MOCK_DETACH_FAIL:-false}" != true ]] || exit 1 ;;
+        if [[ ! -f "$MOCK_ROOT/detached" ]]; then
+          echo /dev/loop999
+        elif [[ -f "$MOCK_ROOT/detach-delay" ]]; then
+          remaining=$(cat "$MOCK_ROOT/detach-delay")
+          if (( remaining > 0 )); then
+            echo "$((remaining - 1))" > "$MOCK_ROOT/detach-delay"
+            echo /dev/loop999
+          fi
+        fi ;;
+      *--detach*)
+        [[ "${MOCK_DETACH_FAIL:-false}" != true ]] || exit 1
+        touch "$MOCK_ROOT/detached"
+        echo "${MOCK_DETACH_DELAY:-0}" > "$MOCK_ROOT/detach-delay" ;;
     esac ;;
   kind)
     case "$1 ${2:-}" in
@@ -85,12 +101,15 @@ class KindBlockLifecycle(unittest.TestCase):
         self.state = self.root / "state"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for name in ["id", "sudo", "docker", "losetup", "kind", "kubectl", "go", "podman", "chown"]:
+        for name in ["id", "sudo", "docker", "losetup", "kind", "kubectl", "go", "podman", "chown", "uname", "python3"]:
             path = self.bin / name
             path.write_text(MOCK)
             path.chmod(0o755)
         self.env = dict(os.environ)
-        for key in ["DOCKER_HOST", "DOCKER_CONTEXT", "KIND_HA", "KUBECONFIG"]:
+        for key in [
+            "DOCKER_HOST", "DOCKER_CONTEXT", "KIND_HA", "KUBECONFIG",
+            "KIND_BLOCK_MODE", "KIND_BLOCK_WORKERS",
+        ]:
             self.env.pop(key, None)
         self.env.update(
             PATH=f"{self.bin}:{os.environ['PATH']}", MOCK_ROOT=str(self.root),
@@ -159,7 +178,7 @@ class KindBlockLifecycle(unittest.TestCase):
         self.assertTrue((self.state / "block.img").exists())
 
     def test_device_errors_preserve_state_for_retry(self):
-        for fault in ["MOCK_LOOKUP_FAIL", "MOCK_DETACH_FAIL"]:
+        for fault in ["MOCK_LOOKUP_FAIL", "MOCK_DETACH_FAIL", "MOCK_REFERENCES_FAIL"]:
             with self.subTest(fault=fault):
                 if not (self.state / "owned").exists():
                     self.setup_cluster()
@@ -172,6 +191,21 @@ class KindBlockLifecycle(unittest.TestCase):
         (self.root / "cluster").write_text("block-test\n")
         self.run_script("teardown.sh")
         self.assertTrue((self.root / "cluster").exists())
+
+    def test_reference_cleanup_can_release_autoclear_source(self):
+        self.setup_cluster()
+        self.run_script("teardown.sh", MOCK_REFERENCES_AUTOCLEAR="true")
+        self.assertNotIn("losetup --detach", self.calls())
+        self.assertFalse((self.state / "block.img").exists())
+        self.assertFalse((self.state / "owned").exists())
+
+    def test_delayed_loop_detach_completes_before_image_removal(self):
+        self.setup_cluster()
+        self.run_script("teardown.sh", MOCK_DETACH_DELAY="2")
+        self.assertFalse((self.state / "block.img").exists())
+        self.assertFalse((self.state / "owned").exists())
+        self.assertEqual(sum(line.startswith("losetup --detach") for line in self.calls().splitlines()), 1)
+        self.assertEqual((self.root / "detach-delay").read_text().strip(), "0")
 
     def test_wrong_cluster_cannot_use_state(self):
         self.setup_cluster()

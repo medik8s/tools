@@ -5,7 +5,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+kind_block_settings() {
+    KIND_BLOCK_MODE=${KIND_BLOCK_MODE:-shared}
+    case "$KIND_BLOCK_MODE" in
+        shared)
+            [[ ! ${KIND_BLOCK_WORKERS+x} ]] || {
+                echo "KIND_BLOCK_WORKERS requires KIND_BLOCK_MODE=per-node." >&2; return 1;
+            }
+            ;;
+        per-node)
+            [[ ${KIND_BLOCK_WORKERS-3} =~ ^0*([3-9]|[1-9][0-9]+)$ ]] || {
+                echo "KIND_BLOCK_WORKERS must be an integer of at least 3." >&2; return 1;
+            }
+            ;;
+        *) echo "Unknown KIND_BLOCK_MODE: $KIND_BLOCK_MODE" >&2; return 1 ;;
+    esac
+    export KIND_BLOCK_MODE
+}
+
 kind_block_state() {
+    kind_block_settings
     [[ "$CLUSTER_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
         echo "Invalid Kind cluster name: $CLUSTER_NAME" >&2; return 1;
     }
@@ -14,7 +33,7 @@ kind_block_state() {
         echo "KIND_BLOCK_STATE_DIR must be an absolute path." >&2; return 1;
     }
     export KUBECONFIG="$KIND_BLOCK_STATE_DIR/kubeconfig"
-    if [[ -f "$KIND_BLOCK_STATE_DIR/owned" ]]; then
+    if [[ "$KIND_BLOCK_MODE" == shared && -f "$KIND_BLOCK_STATE_DIR/owned" ]]; then
         [[ $(cat "$KIND_BLOCK_STATE_DIR/owned") == "$CLUSTER_NAME" ]] || {
             echo "Block state belongs to another cluster." >&2; return 1;
         }
@@ -28,7 +47,7 @@ kind_block_check_host() {
     }
     
     local cmd endpoint security_options operating_system
-    for cmd in "$tool" losetup truncate; do command -v "$cmd" >/dev/null || return 1; done
+    for cmd in "$tool" losetup truncate python3; do command -v "$cmd" >/dev/null || return 1; done
     kind_sudo true
     
     if [[ "$tool" == "docker" ]]; then
@@ -55,6 +74,11 @@ kind_block_check_host() {
 }
 
 kind_block_prepare() {
+    if [[ "$KIND_BLOCK_MODE" == per-node ]]; then
+        python3 "$SCRIPT_DIR/kind_block_per_node.py" allocate
+        KIND_CONFIG="$KIND_BLOCK_STATE_DIR/kind.yaml"
+        return
+    fi
     [[ ! -e "$KIND_BLOCK_STATE_DIR/owned" && ! -e "$KIND_BLOCK_STATE_DIR/block.img" ]] || {
         echo "Unfinished block environment: run dev-teardown with the same block settings first." >&2; return 1;
     }
@@ -108,12 +132,16 @@ EOF
 }
 
 kind_block_install() {
+    if [[ "$KIND_BLOCK_MODE" == per-node ]]; then
+        python3 "$SCRIPT_DIR/kind_block_per_node.py" install
+        return
+    fi
     local node nodes tool="${CONTAINER_TOOL:-docker}"
     [[ $(${KUBECTL} config current-context) == "kind-$CLUSTER_NAME" ]] || {
         echo "Refusing to install storage outside kind-$CLUSTER_NAME." >&2; return 1;
     }
     nodes=$(${KUBECTL} get nodes -l medik8s.io/kind-block=true -o name)
-    [[ $(wc -w <<< "$nodes") == 2 ]] || { echo "Expected two block-enabled workers." >&2; return 1; }
+    [[ $(wc -w <<< "$nodes") -eq 2 ]] || { echo "Expected two block-enabled workers." >&2; return 1; }
 
     for node in $nodes; do
         "$tool" exec "${node#node/}" test -e /dev/medik8s-kind-block || {
@@ -131,13 +159,25 @@ kind_block_cleanup() {
     [[ -f "$KIND_BLOCK_STATE_DIR/owned" ]] || return 0
     # Called only AFTER Kind has removed every node. A failed lookup/detach
     # must preserve the backing file and ownership marker for a cleanup retry.
-    local devices device containers tool="${CONTAINER_TOOL:-docker}"
+    local devices device associated attempt containers tool="${CONTAINER_TOOL:-docker}"
     containers=$("$tool" ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER_NAME")
     [[ -z "$containers" ]] || { echo "Kind nodes still exist; refusing to detach block storage." >&2; return 1; }
     devices=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
     while read -r device; do
-        [[ -z "$device" ]] || kind_sudo losetup --detach "$device"
+        if [[ -n "$device" ]]; then
+            kind_sudo python3 "$SCRIPT_DIR/kind_block_references.py" "$device"
+            associated=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
+            if grep -Fxq -- "$device" <<< "$associated"; then
+                kind_sudo losetup --detach "$device"
+            fi
+        fi
     done <<< "$devices"
+    for ((attempt=0; attempt<50; attempt++)); do
+        devices=$(kind_sudo losetup --associated "$KIND_BLOCK_STATE_DIR/block.img" --noheadings --output NAME)
+        [[ -n "$devices" ]] || break
+        sleep 0.1
+    done
+    [[ -z "$devices" ]] || { echo "Loop detach is incomplete. Preserve the block fixture for retry." >&2; return 1; }
     rm -f "$KIND_BLOCK_STATE_DIR/block.img" "$KIND_BLOCK_STATE_DIR/loop-device" \
         "$KIND_BLOCK_STATE_DIR/owned" "$KIND_BLOCK_STATE_DIR/kubeconfig"
 }

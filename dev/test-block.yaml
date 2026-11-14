@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: shared-block-pvc
 spec:
+  volumeMode: Block
   accessModes:
     - ReadWriteMany
   resources:
@@ -21,12 +22,12 @@ spec:
     medik8s.io/kind-block: "true"
   containers:
   - name: ubuntu
-    image: ubuntu:latest
+    image: ubuntu:24.04
     command: ["/bin/sh", "-c", "sleep infinity"]
     securityContext:
       privileged: true
-    volumeMounts:
-    - mountPath: /dev/testblock
+    volumeDevices:
+    - devicePath: /dev/testblock
       name: block-vol
   volumes:
   - name: block-vol
@@ -53,12 +54,12 @@ spec:
         topologyKey: "kubernetes.io/hostname"
   containers:
   - name: ubuntu
-    image: ubuntu:latest
+    image: ubuntu:24.04
     command: ["/bin/sh", "-c", "sleep infinity"]
     securityContext:
       privileged: true
-    volumeMounts:
-    - mountPath: /dev/testblock
+    volumeDevices:
+    - devicePath: /dev/testblock
       name: block-vol
   volumes:
   - name: block-vol
